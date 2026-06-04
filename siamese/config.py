@@ -3,6 +3,8 @@
 All audio + pipeline hyperparameters live here so the data pipeline, training,
 evaluation, and the eventual VMS integration share one source of truth.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 

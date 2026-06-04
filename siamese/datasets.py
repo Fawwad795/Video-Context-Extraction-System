@@ -9,6 +9,8 @@ Note: the 35 Speech Commands words are only the *training vocabulary*. Because t
 network learns a general similarity function (not a fixed classifier), it generalizes to
 arbitrary unseen keywords at inference time.
 """
+from __future__ import annotations
+
 import os
 import random
 from collections import defaultdict

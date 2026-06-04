@@ -4,6 +4,8 @@ Two waveform-level ops (background noise at a target SNR, pitch/time perturbatio
 spectrogram-level op (SpecAugment time/frequency masking). These mirror the ideation's
 "noise, accents, speed" robustness goals.
 """
+from __future__ import annotations
+
 import glob
 import os
 import random

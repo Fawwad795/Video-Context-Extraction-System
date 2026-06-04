@@ -52,7 +52,8 @@ def evaluate(model, loader, device):
     thr = thr[np.isfinite(thr)]
     acc, best_t = max((accuracy_score(labels, scores >= t), float(t)) for t in thr)
     f1 = f1_score(labels, scores >= best_t)
-    return dict(auc=auc, acc=acc, f1=f1, threshold=best_t)
+    # cast to plain floats so checkpoints stay weights_only-safe
+    return dict(auc=float(auc), acc=float(acc), f1=float(f1), threshold=float(best_t))
 
 
 def main():
@@ -111,7 +112,7 @@ def main():
             torch.save({"state_dict": model.state_dict(), "model": args.model,
                         "args": vars(args), "val": val}, ckpt_path)
 
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["state_dict"])
     test = evaluate(model, test_loader, device)
     print("\n==== P2 Siamese result (held-out TEST) ====")

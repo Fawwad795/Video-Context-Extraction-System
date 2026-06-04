@@ -4,6 +4,8 @@ This is the shared input representation for both legs of the Siamese network. Ke
 in one place guarantees the live-stream chunk and the synthesized keyword are featurized
 identically at inference time.
 """
+from __future__ import annotations
+
 import soundfile as sf
 import torch
 import torchaudio
