@@ -134,6 +134,11 @@ already scored FPR ~0.007 on them), so we fine-tuned (warm-start from P2) with r
 (journalism median 0.888 → 0.749), so the p45 model wants a **recalibrated threshold (~0.72–0.75)**
 for broadcast.
 
+**Live re-test (same stream + keyword "journalism"):** with the p45 model at threshold 0.73,
+chunks firing dropped from **26/29 (P2 @ 0.80) → 11/29 (p45 @ 0.73)** — over-detection cut ~58%
+in real time, with remaining detections scoring 0.76–0.90 (plausibly genuine on a
+journalism-themed stream).
+
 **Honest residual:** real broadcast TV (music/noise/codec) is still harder than clean LibriSpeech
 read speech. The over-detection is now substantially controlled with recall retained, but the
 last mile would use **broadcast-domain negatives** (recorded news audio) + labeled broadcast
