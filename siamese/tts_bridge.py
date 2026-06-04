@@ -16,6 +16,7 @@ CLI:
 """
 import argparse
 import os
+from pathlib import Path
 
 import soundfile as sf
 import torch
@@ -66,14 +67,16 @@ def _load_tts():
     return _TTS
 
 
-def synthesize_word(word: str, overwrite: bool = False) -> list[str]:
-    """Synthesize `word` in all 7 accents, caching each as a 16 kHz WAV. Returns file paths."""
-    TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+def synthesize_word(word: str, overwrite: bool = False, out_dir=None) -> list[str]:
+    """Synthesize `word` in all 7 accents as 16 kHz WAVs in out_dir (default cache). Returns paths.
+
+    Files are named '{speaker}-{word}.wav', matching both the cache and the VMS
+    Stream*_searchword1 layout, so the same files feed the prototype builder either way.
+    """
+    out = Path(out_dir) if out_dir is not None else TTS_CACHE_DIR
+    out.mkdir(parents=True, exist_ok=True)
     paths = []
-    pending = {
-        spk: TTS_CACHE_DIR / f"{spk}-{word}.wav"
-        for spk in SPEAKERS
-    }
+    pending = {spk: out / f"{spk}-{word}.wav" for spk in SPEAKERS}
     if not overwrite and all(p.exists() for p in pending.values()):
         return [str(p) for p in pending.values()]
 
@@ -92,10 +95,11 @@ def synthesize_word(word: str, overwrite: bool = False) -> list[str]:
     return paths
 
 
-def precompute(words: list[str], overwrite: bool = False) -> None:
+def precompute(words: list[str], overwrite: bool = False, out_dir=None) -> None:
     for i, w in enumerate(words, 1):
-        synthesize_word(w, overwrite=overwrite)
-        print(f"[{i}/{len(words)}] cached '{w}' x{len(SPEAKERS)} accents")
+        synthesize_word(w, overwrite=overwrite, out_dir=out_dir)
+        where = out_dir if out_dir is not None else TTS_CACHE_DIR
+        print(f"[{i}/{len(words)}] synthesized '{w}' x{len(SPEAKERS)} accents -> {where}")
 
 
 if __name__ == "__main__":
@@ -104,6 +108,9 @@ if __name__ == "__main__":
     ap.add_argument("--all-speech-commands", action="store_true",
                     help="synthesize all 35 Speech Commands words")
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--out-dir", default=None,
+                    help="output dir (default: the tts_cache; pass a VMS Stream*_searchword1 dir "
+                         "to feed the live detector)")
     args = ap.parse_args()
 
     targets = list(args.words)
@@ -111,5 +118,5 @@ if __name__ == "__main__":
         targets = SPEECH_COMMANDS_WORDS
     if not targets:
         ap.error("provide --words ... or --all-speech-commands")
-    precompute(targets, overwrite=args.overwrite)
-    print(f"Done. Cache: {TTS_CACHE_DIR}")
+    precompute(targets, overwrite=args.overwrite, out_dir=args.out_dir)
+    print(f"Done. Output: {args.out_dir or TTS_CACHE_DIR}")

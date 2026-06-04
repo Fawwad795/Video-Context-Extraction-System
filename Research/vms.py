@@ -209,9 +209,16 @@ class TextToSpeechStream:
         self.root.after(3000, self.update_mp4_count)
 
     def start_corelation_updated(self):
-        self.status_label.config(text=f"Status: {self.stream_name}_corelation_updated_v2.py started successfully.")
+        # Detector backend: "correlation" (original np.correlate) or "siamese" (trained model).
+        # Switch with the VMS_DETECTOR environment variable; defaults to the original.
+        detector = os.environ.get("VMS_DETECTOR", "correlation")
+        if detector == "siamese":
+            script = f"{self.stream_name}_siamese_detect.py"
+        else:
+            script = f"{self.stream_name}_corelation_updated_v2.py"
+        self.status_label.config(text=f"Status: {script} started successfully.")
         python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'Scripts', 'python.exe')
-        return subprocess.Popen([python_exe, f"{self.stream_name}_corelation_updated_v2.py"])
+        return subprocess.Popen([python_exe, script])
 
     def moniter_process(self):
         self.monitoring_active = True
