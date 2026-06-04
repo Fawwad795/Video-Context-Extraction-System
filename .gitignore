@@ -1,0 +1,38 @@
+# --- Local agent / IDE state ---
+.claude/
+.vscode/
+.idea/
+
+# --- Extension ideation (kept local, per project decision) ---
+Extension/
+
+# --- Reference papers + proposal (copyrighted / kept local) ---
+Published_Paper_Reads_For_Extension/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+venv/
+ENV/
+env/
+.venv/
+
+# --- VMS runtime output / media / model artifacts ---
+*.wav
+*.mp4
+*.h5
+*.pt
+*.onnx
+*.engine
+VMS/
+
+# --- OS ---
+Thumbs.db
+.DS_Store
