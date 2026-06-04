@@ -108,4 +108,33 @@ ordinary broadcast speech sits near the cutoff, and 26/29 chunks fired at thresh
   open-set "background prototype" rejection (require keyword score ≫ background score).
 
 Net: the integration is mechanically complete and reusable; reaching deployment quality on
-real broadcast audio needs continuous-speech calibration/training — a focused follow-up.
+real broadcast audio needs continuous-speech calibration/training — done in P4.5.
+
+## P4.5 — dense-speech hard-negative fine-tune
+
+Refined cause: the P2 model maps arbitrary DENSE-speech windows near word prototypes, so with
+the sliding-window max over ~9 windows/chunk a ~7% per-window false rate compounds into
+broadcast over-detection. Concatenated Speech Commands negatives were too easy (the P2 model
+already scored FPR ~0.007 on them), so we fine-tuned (warm-start from P2) with random
+**LibriSpeech** windows as dense hard negatives, plus keyword-in-context positives to hold recall.
+
+**Controlled held-out test (LibriSpeech negatives, thr 0.80):**
+
+| Metric | Before (P2) | After (P4.5) |
+|---|---|---|
+| Continuous **FPR** | 0.070 | **0.007** (10× lower) |
+| Continuous **TPR** | 0.960 | **0.979** |
+| Isolated-word AUC | 0.987 | 0.985 (retained) |
+
+10× fewer per-window false positives, recall slightly *up*, isolated accuracy held. Checkpoint
+`siamese_full_p45.pt` is now the VMS detector default.
+
+**On the 29 real broadcast chunks (thr 0.80):** over-detection roughly halved — "journalism"
+26/29 → **10/29**; unrelated words also fell (right 5→2, stop 6→4, house 3→2). Scores compressed
+(journalism median 0.888 → 0.749), so the p45 model wants a **recalibrated threshold (~0.72–0.75)**
+for broadcast.
+
+**Honest residual:** real broadcast TV (music/noise/codec) is still harder than clean LibriSpeech
+read speech. The over-detection is now substantially controlled with recall retained, but the
+last mile would use **broadcast-domain negatives** (recorded news audio) + labeled broadcast
+threshold calibration. That's the natural follow-up if pushing to production.

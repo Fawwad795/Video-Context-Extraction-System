@@ -17,7 +17,7 @@ detector in the original VMS (`../Research/`). Full design + rationale:
 | P2 | Siamese CNN (full + reduced) + contrastive loss, trained on the AWS L4 GPU | ✅ done — full AUC **0.987** |
 | P3 | Offline benchmark (mAP, robustness vs SNR, synth↔real reference) | ✅ done — robust to noise; mAP **0.835**; synth prototype ≈ real ref |
 | P4 | Drop-in integration into the VMS detector (parallel `Stream*_siamese_detect.py` + GUI switch) | ✅ pipeline works live; ⚠️ over-detects on continuous speech → P4.5 |
-| P4.5 | Continuous-speech calibration: hard-negative training + threshold calibration on broadcast audio + VAD/open-set rejection | next |
+| P4.5 | Dense-speech (LibriSpeech) hard-negative fine-tune | ✅ done — continuous FPR **0.070 → 0.007**, TPR 0.96 → 0.98, AUC retained; broadcast over-detection ~halved (needs thr ~0.72–0.75) |
 | P5 | Edge export (ONNX/TensorRT) + on-device latency/RAM | pending |
 
 See [RESULTS.md](RESULTS.md) for the full P0 vs P2 comparison.

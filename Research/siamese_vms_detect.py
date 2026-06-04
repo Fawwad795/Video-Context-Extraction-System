@@ -28,7 +28,9 @@ sys.path.insert(0, _REPO)
 from siamese.detector import SiameseDetector  # noqa: E402
 
 BASE = os.path.expanduser(os.path.join("~", "VMS", "GUI2CHjetson"))
-DEFAULT_CKPT = os.path.join(_REPO, "siamese", "checkpoints", "siamese_full_v1.pt")
+# P4.5 dense-negative model (lower broadcast false-alarm rate). For this model a threshold
+# around 0.72-0.75 suits real broadcast audio better than 0.80 (set VMS_SIAMESE_THRESHOLD).
+DEFAULT_CKPT = os.path.join(_REPO, "siamese", "checkpoints", "siamese_full_p45.pt")
 
 
 def _keywords_in(searchword_dir: str) -> list[str]:
