@@ -15,8 +15,8 @@ detector in the original VMS (`../Research/`). Full design + rationale:
 | P1 | Data pipeline: Speech Commands loader, pair generator, augmentation, TTS bridge | ✅ done |
 | P0 | Correlation baseline on the held-out test split | ✅ done — AUC **0.555** |
 | P2 | Siamese CNN (full + reduced) + contrastive loss, trained on the AWS L4 GPU | ✅ done — full AUC **0.987** |
-| P3 | Offline benchmark (mAP, robustness vs SNR/accent, synth↔real reference) | next |
-| P4 | Drop-in integration into the VMS detector | pending |
+| P3 | Offline benchmark (mAP, robustness vs SNR, synth↔real reference) | ✅ done — robust to noise; mAP **0.835**; synth prototype ≈ real ref |
+| P4 | Drop-in integration into the VMS detector | next |
 | P5 | Edge export (ONNX/TensorRT) + on-device latency/RAM | pending |
 
 See [RESULTS.md](RESULTS.md) for the full P0 vs P2 comparison.

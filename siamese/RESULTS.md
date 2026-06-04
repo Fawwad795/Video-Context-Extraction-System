@@ -48,7 +48,39 @@ near-chance to near-perfect.
   noisier. P3 will measure robustness vs SNR/accent and the synthetic↔real reference gap before
   any deployment claims.
 
-## Next (P3)
+## P3 — robustness & deployment realism (full model)
 
-Robustness curves (accuracy vs SNR, vs accent), retrieval **mAP**, and the synthesized-keyword
-(prototype) vs real-reference comparison — the deployment-relevant evaluation.
+Deployment-relevant stress tests on the held-out test set (`evaluate_p3.py`, `p3_prototype.py`).
+
+**A. Noise robustness** — background noise added to *both* clips of each pair (conservative),
+AUC is threshold-free:
+
+| SNR | clean | 20 dB | 15 dB | 10 dB | 5 dB | 0 dB |
+|---|---|---|---|---|---|---|
+| AUC | 0.988 | 0.984 | 0.978 | 0.971 | 0.952 | **0.900** |
+| acc @ clean threshold | 0.962 | 0.945 | 0.932 | 0.915 | 0.883 | 0.812 |
+
+Graceful degradation: even at **0 dB** (noise as loud as the speech) AUC is 0.900 — still far
+above the correlation baseline's *clean* 0.555. (`artifacts/p3_robustness_full.png`)
+
+**B. Retrieval mAP:** **0.835** (1,400 clips, 40/word) — same-word clips rank at the top.
+
+**C. Synthesized-keyword (prototype) vs real reference** — match 1,050 real test clips against
+35 keyword references; 35-way top-1 (chance = 0.029):
+
+| Reference | Top-1 acc | AUC |
+|---|---|---|
+| **Synthetic prototype** (7 accents averaged) | **0.877** | 0.993 |
+| Real reference (real train clips) | 0.886 | 0.993 |
+| synthetic → real gap | **0.009** | 0.000 |
+
+**Key finding:** the synthesized keyword prototype matches real speech *as well as a real
+recording* (~1-point gap, identical AUC). The synthetic↔real domain gap — the top risk in the
+ideation — is negligible, so the VMS needs **no real enrollment audio**: keep the existing TTS
+keyword, average its 7 accents into one prototype, and match by cosine similarity.
+
+## Next (P4)
+
+Drop-in integration: replace the `np.correlate` block in the VMS detector
+(`Research/Stream1_corelation_updated_v2.py`) with *embed the chunk → cosine vs the keyword
+prototype → calibrated threshold*, reusing the trained checkpoint.

@@ -57,7 +57,11 @@ def _load_tts():
     processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
     model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts").to(device)
     vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan").to(device)
-    embeddings = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
+    # datasets>=4 dropped loading-script support; this dataset uses one, so request it
+    # explicitly. Requires datasets<4 installed.
+    embeddings = load_dataset(
+        "Matthijs/cmu-arctic-xvectors", split="validation", trust_remote_code=True
+    )
     _TTS = (processor, model, vocoder, embeddings, device)
     return _TTS
 
