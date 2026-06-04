@@ -79,8 +79,33 @@ recording* (~1-point gap, identical AUC). The synthetic↔real domain gap — th
 ideation — is negligible, so the VMS needs **no real enrollment audio**: keep the existing TTS
 keyword, average its 7 accents into one prototype, and match by cosine similarity.
 
-## Next (P4)
+## P4 — VMS integration + live YouTube test
 
-Drop-in integration: replace the `np.correlate` block in the VMS detector
-(`Research/Stream1_corelation_updated_v2.py`) with *embed the chunk → cosine vs the keyword
-prototype → calibrated threshold*, reusing the trained checkpoint.
+The detector was wired into the VMS as a **parallel path** (`Research/siamese_vms_detect.py`,
+`Stream*_siamese_detect.py`, `VMS_DETECTOR=siamese` switch) and run end-to-end on a live
+stream: synthesize keyword → download 5-s chunks → embed → cosine vs prototype → save context
+clip + timestamp log. **The plumbing works** — the pipeline ran live, built the "journalism"
+prototype, scored chunks, and produced the same outputs as the original detector.
+
+**The live test exposed an over-detection problem on continuous broadcast speech** that the
+isolated-word evaluation (P2/P3) could not reveal. Against the "journalism" prototype, the
+max-over-window cosine across 29 live chunks was: **min 0.752, median 0.888, max 0.985** — so
+ordinary broadcast speech sits near the cutoff, and 26/29 chunks fired at threshold 0.80
+(far too many for a single keyword).
+
+**Why (the isolated-word → continuous-speech gap):**
+1. Trained/evaluated on *isolated single words*; broadcast audio is *continuous*, so every 1-s
+   window holds word fragments that embed near *some* word.
+2. Sliding-window **max** over ~9–10 windows/chunk biases the score upward.
+3. The model has no "background / no-keyword" class — it only learned word-vs-word similarity,
+   so it cannot *reject* non-keyword speech.
+
+**Path forward (P4.5 — make it deployment-grade on broadcast audio):**
+- Calibrate the threshold on broadcast-like audio with continuous-speech **hard negatives**
+  (not isolated-word pairs).
+- Fine-tune with negatives drawn from continuous speech / other words (the biggest lever).
+- Better segmentation: VAD or word-boundary windows instead of arbitrary 1-s slices; and/or an
+  open-set "background prototype" rejection (require keyword score ≫ background score).
+
+Net: the integration is mechanically complete and reusable; reaching deployment quality on
+real broadcast audio needs continuous-speech calibration/training — a focused follow-up.
