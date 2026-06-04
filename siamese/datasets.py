@@ -17,7 +17,7 @@ import torch
 import torchaudio
 from torch.utils.data import Dataset
 
-from .audio import load_wav, log_mel
+from .audio import fix_length, load_wav, log_mel
 from .config import AUDIO, NOISE_LABEL, PAIRS, SC_CORPUS, SC_ROOT
 
 VALID_SUBSETS = ("training", "validation", "testing")
@@ -46,12 +46,21 @@ class SpeechCommandsWords(Dataset):
     def label_of(self, i: int) -> str:
         return self.labels[i]
 
-    def __getitem__(self, i: int):
-        relpath, sr, label, speaker, _ = self._metas[i]
+    def _load(self, i: int) -> torch.Tensor:
+        """Load item i as a mono waveform resampled to the target rate (not yet fixed-length)."""
+        relpath, _, _, _, _ = self._metas[i]
         wav, sr = load_wav(os.path.join(self._base, relpath))
         if sr != AUDIO.sample_rate:
             wav = torchaudio.functional.resample(wav, sr, AUDIO.sample_rate)
-        return log_mel(wav), label, speaker
+        return wav
+
+    def raw_waveform(self, i: int) -> torch.Tensor:
+        """Fixed-length mono waveform for item i (used by the P0 correlation baseline)."""
+        return fix_length(self._load(i))
+
+    def __getitem__(self, i: int):
+        wav = self._load(i)
+        return log_mel(wav), self._metas[i][2], self._metas[i][3]
 
 
 class PairDataset(Dataset):
