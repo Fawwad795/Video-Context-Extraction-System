@@ -24,6 +24,13 @@ ENV/
 env/
 .venv/
 
+# --- Siamese extension: data, caches, artifacts, checkpoints ---
+siamese/data/
+siamese/tts_cache/
+siamese/artifacts/
+siamese/checkpoints/
+siamese/runs/
+
 # --- VMS runtime output / media / model artifacts ---
 *.wav
 *.mp4

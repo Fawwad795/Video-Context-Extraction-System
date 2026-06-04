@@ -1,0 +1,15 @@
+# Siamese extension — runtime + training dependencies.
+# torch/torchaudio: install the CUDA build on the GPU box, CPU build elsewhere.
+torch>=2.1
+torchaudio>=2.1
+numpy>=1.24
+scikit-learn>=1.3
+librosa>=0.10
+soundfile>=0.12
+tqdm>=4.65
+matplotlib>=3.7
+
+# TTS bridge (synthetic<->real pairs); only needed to (re)build the keyword cache.
+transformers>=4.30
+datasets>=2.14
+sentencepiece>=0.1.99
