@@ -134,12 +134,27 @@ already scored FPR ~0.007 on them), so we fine-tuned (warm-start from P2) with r
 (journalism median 0.888 → 0.749), so the p45 model wants a **recalibrated threshold (~0.72–0.75)**
 for broadcast.
 
-**Live re-test (same stream + keyword "journalism"):** with the p45 model at threshold 0.73,
-chunks firing dropped from **26/29 (P2 @ 0.80) → 11/29 (p45 @ 0.73)** — over-detection cut ~58%
-in real time, with remaining detections scoring 0.76–0.90 (plausibly genuine on a
-journalism-themed stream).
+**Live re-test + manual check — CRITICAL correction.** Re-running the live stream with the p45
+model at threshold 0.73 dropped firing from 26/29 (P2 @ 0.80) to 11/29. **But listening to the 11
+detected chunks confirmed NONE actually contain "journalism" — they are all false positives.**
+So P4.5 lowers the false-alarm *count* but does not solve detection for this keyword.
 
-**Honest residual:** real broadcast TV (music/noise/codec) is still harder than clean LibriSpeech
-read speech. The over-detection is now substantially controlled with recall retained, but the
-last mile would use **broadcast-domain negatives** (recorded news audio) + labeled broadcast
-threshold calibration. That's the natural follow-up if pushing to production.
+**The real limitation (uncovered by testing a real keyword): "journalism" is out-of-distribution.**
+The model is trained only on the 35 short, common Speech Commands words, and *every* headline
+number above (AUC 0.987, prototype top-1 0.877, the 10× FPR drop) was measured on those SAME 35
+words — the evaluation's blind spot. For an arbitrary real keyword like "journalism":
+- SpeechT5 mis-synthesizes it (clips ~0.8 s, garbled; cosine to synth-"journal" only 0.55), so the
+  prototype is poor; and
+- the model has never seen long/multi-syllable words, so the embedding is unreliable and lands
+  near generic broadcast speech → false positives.
+
+**What these results do and don't show:**
+- DO: Siamese ≫ correlation, noise robustness, and synthetic-prototype matching — **for short,
+  in-vocabulary keywords** (the 35 SC words). The VMS integration works mechanically.
+- DON'T: generalization to **arbitrary real-world keywords**. "journalism" fails end-to-end.
+
+**To actually support real keywords (future work):**
+- train on a BROAD vocabulary (thousands of words, or subword/phonetic units), not 35 words;
+- faithful TTS for the full keyword (fix SpeechT5 early-stopping, or use a stronger TTS);
+- variable-length handling for multi-syllable words (the fixed 1 s window is too short);
+- evaluate on OUT-OF-vocabulary keywords + real labeled broadcast audio — never the training words.
