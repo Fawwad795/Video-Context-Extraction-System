@@ -1,0 +1,10 @@
+[2026-06-07 19:30:28] AI Match Found! Cosine Sim: 0.66 | Chunk: live_0.wav at 0.5s
+[2026-06-07 19:30:29] AI Match Found! Cosine Sim: 0.80 | Chunk: live_1.wav at 1.6s
+[2026-06-07 19:30:29] AI Match Found! Cosine Sim: 0.83 | Chunk: live_2.wav at 0.0s
+[2026-06-07 19:30:30] AI Match Found! Cosine Sim: 0.66 | Chunk: live_3.wav at 0.8s
+[2026-06-07 19:30:30] AI Match Found! Cosine Sim: 0.77 | Chunk: live_4.wav at 0.3s
+[2026-06-07 19:30:31] AI Match Found! Cosine Sim: 0.85 | Chunk: live_5.wav at 0.8s
+[2026-06-07 19:30:32] AI Match Found! Cosine Sim: 0.66 | Chunk: live_6.wav at 0.8s
+[2026-06-07 19:30:32] AI Match Found! Cosine Sim: 0.77 | Chunk: live_7.wav at 0.3s
+[2026-06-07 19:30:33] AI Match Found! Cosine Sim: 0.85 | Chunk: live_8.wav at 0.8s
+[2026-06-07 19:30:35] AI Match Found! Cosine Sim: 0.77 | Chunk: live_9.wav at 2.5s
