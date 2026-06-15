@@ -1,102 +1,185 @@
-import os
-import glob
-import librosa
-from datetime import datetime
-from siamese_model import SiameseAudioModel
+"""Live keyword detection with AS-norm adaptive scoring (Phase 1).
 
-def run_detection(keyword_audio_path, live_audio_dir, output_log_path, threshold=0.75):
-    print("Initializing Siamese AI Detector...")
-    model = SiameseAudioModel()
-    
-    best_model_path = os.path.join(os.path.dirname(keyword_audio_path), "..", "best_siamese_model.pth")
-    if os.path.exists(best_model_path):
-        print(f"Loading optimal AWS checkpoint: {best_model_path}")
-        model.load_weights(best_model_path)
-        # Since the network trained on 5 million examples and converged to a validation loss of ~0.3,
-        # identical words are mapped incredibly tightly. However, to account for acoustic variance across
-        # different real-world speakers, we will use a threshold of 0.75 to prevent false-negatives.
-        threshold = 0.75
-    else:
-        print("Using raw zero-shot embeddings. Threshold might need adjusting.")
-        
-    # Load keyword audio
-    print(f"Loading keyword audio from: {keyword_audio_path}")
-    keyword_y_raw, keyword_sr = librosa.load(keyword_audio_path, sr=16000)
-    
-    # Strip leading/trailing silence from the synthetic TTS to ensure sliding window is exactly the word length
-    keyword_y, _ = librosa.effects.trim(keyword_y_raw, top_db=30)
-    
-    # Get reference embedding
-    print("Generating reference embedding for keyword...")
-    keyword_embed = model.get_embedding(keyword_y, keyword_sr)
-    
-    # Keyword duration
-    keyword_duration = len(keyword_y) / keyword_sr
-    
-    # Get live audio chunks
-    audio_files = glob.glob(os.path.join(live_audio_dir, "*.wav"))
-    audio_files.sort(key=lambda x: int(os.path.basename(x).split("_")[1].split(".")[0]))
-    
-    os.makedirs(os.path.dirname(output_log_path), exist_ok=True)
-    
-    print(f"\nStarting detection on {len(audio_files)} live chunks. Threshold: {threshold}")
-    
+What changed vs. the original detector:
+  anchor    - multi-voice TTS prototype centroid (keywords/<kw>_anchor.npz)
+              instead of a single TTS/human clip (override: --anchor-audio);
+  score     - cosine similarity on L2-normalized embeddings instead of raw
+              L2 distance;
+  decision  - Adaptive S-norm against an impostor cohort, compared to the
+              calibrated per-keyword threshold from calibrate.py, instead
+              of a hardcoded distance like 1.25;
+  speed     - sliding windows are embedded in batches.
+
+Outputs: logs/timestamps_<keyword>.txt   (append, human-readable)
+         logs/detections_<keyword>.json  (overwrite, for validate_detection.py)
+"""
+
+import argparse
+import json
+import os
+from datetime import datetime
+
+import librosa
+import numpy as np
+
+from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, asnorm_windows,
+                     embed_batch, l2_normalize, list_chunk_audios,
+                     load_cohort, load_siamese_model)
+
+DEFAULT_FALLBACK_THRESHOLD = 2.5
+
+
+def load_anchor(keyword, anchor_audio, model):
+    """Returns (anchor_embedding [D], window_samples, description)."""
+    if anchor_audio:
+        y, _ = librosa.load(anchor_audio, sr=SAMPLE_RATE)
+        y, _ = librosa.effects.trim(y, top_db=30)
+        emb = embed_batch(model, [y.astype(np.float32)])[0]
+        return emb, len(y), f"audio file {os.path.basename(anchor_audio)}"
+
+    npz_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(
+            f"{npz_path} not found - run keyword_generator.py first "
+            f"(or pass --anchor-audio <wav/m4a> to use a recorded anchor).")
+    data = np.load(npz_path)
+    return (l2_normalize(data["centroid"]), int(data["window_samples"]),
+            "TTS prototype centroid")
+
+
+def resolve_threshold(keyword, override):
+    if override is not None:
+        return float(override), "command-line override"
+    calib_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_calibration.json")
+    if os.path.exists(calib_path):
+        with open(calib_path) as f:
+            calib = json.load(f)
+        return float(calib["threshold"]), f"calibrated ({calib_path})"
+    print(f"WARNING: no calibration found - using fallback threshold "
+          f"{DEFAULT_FALLBACK_THRESHOLD}. Run calibrate.py for a fitted one.")
+    return DEFAULT_FALLBACK_THRESHOLD, "uncalibrated fallback"
+
+
+def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
+                  top_k=DEFAULT_TOP_K, batch_size=16, scales=(0.6, 0.8, 1.0)):
+    print("Initializing Siamese AS-norm detector...")
+    model = load_siamese_model()
+    anchor, window_samples, anchor_desc = load_anchor(keyword, anchor_audio, model)
+    cohort = load_cohort(keyword)
+    threshold, threshold_desc = resolve_threshold(keyword, threshold)
+
+    audio_files = list_chunk_audios()
+    if not audio_files:
+        print("No live chunks found in audios/ - run downloader.py first.")
+        return
+
+    step_samples = max(1, int(SAMPLE_RATE * step_seconds))
+    log_path = os.path.join(PROJECT_ROOT, "logs", f"timestamps_{keyword}.txt")
+    json_path = os.path.join(PROJECT_ROOT, "logs", f"detections_{keyword}.json")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    print(f"\nKeyword: '{keyword}'  |  anchor: {anchor_desc}")
+    print(f"Window: {window_samples / SAMPLE_RATE:.2f}s x scales {list(scales)} "
+          f"(humans often speak faster than TTS)  step: {step_seconds * 1000:.0f}ms  "
+          f"cohort: {cohort.shape[0]}  top-k: {top_k}")
+    print(f"Threshold: {threshold:.3f} AS-norm units ({threshold_desc})")
+    print(f"Scanning {len(audio_files)} chunks...\n")
+
+    results = {"keyword": keyword, "threshold": threshold, "anchor": anchor_desc,
+               "window_seconds": window_samples / SAMPLE_RATE, "chunks": []}
+
     for audio_file in audio_files:
         filename = os.path.basename(audio_file)
-        y, sr = librosa.load(audio_file, sr=16000)
-        
-        # Sliding window parameters
-        window_size = len(keyword_y)  # window size matches keyword length
-        step_size = int(sr * 0.1)     # 0.1 second steps for fine granularity
-        
-        chunk_detected = False
-        min_distance = float('inf')
-        
-        for i in range(0, len(y) - window_size, step_size):
-            window_audio = y[i:i + window_size]
-            
-            # Get embedding for the current sliding window
-            window_embed = model.get_embedding(window_audio, sr)
-            
-            # Compute Siamese L2 Distance
-            distance = model.compute_similarity(keyword_embed, window_embed)
-            if distance < min_distance:
-                min_distance = distance
-            
-            if distance < threshold:
-                timestamp_seconds = i / sr
-                detection_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                msg = f"[{detection_time}] AI Match Found! L2 Distance: {distance:.2f} | Chunk: {filename} at {timestamp_seconds:.1f}s"
-                print(msg)
-                
-                with open(output_log_path, "a") as f:
-                    f.write(msg + "\n")
-                    
-                chunk_detected = True
-                break # Move to next chunk after first detection to avoid spam
-                
-        if not chunk_detected:
-            print(f"Processed {filename} - No matches found < {threshold}. (Closest distance: {min_distance:.2f})")
+        y, _ = librosa.load(audio_file, sr=SAMPLE_RATE)
+
+        # Multi-scale scan: a human saying the keyword faster/slower than the
+        # TTS anchor still gets a window that fits the spoken duration.
+        all_scores, all_raw, all_times, all_scales, n_windows = [], [], [], [], 0
+        for scale in scales:
+            ws = max(int(window_samples * scale), int(0.15 * SAMPLE_RATE))
+            starts = list(range(0, len(y) - ws + 1, step_samples))
+            if not starts:
+                continue
+            windows = [y[s:s + ws].astype(np.float32) for s in starts]
+            embs = embed_batch(model, windows, batch_size=batch_size)
+            normed, raw = asnorm_windows(embs, anchor, cohort, top_k)
+            all_scores.append(normed)
+            all_raw.append(raw)
+            all_times.append(np.array(starts) / SAMPLE_RATE)
+            all_scales.append(np.full(len(starts), scale))
+            n_windows += len(starts)
+
+        if n_windows == 0:
+            print(f"{filename}: shorter than the keyword window - skipped.")
+            results["chunks"].append(
+                {"file": filename, "skipped": True, "detections": []})
+            continue
+
+        normed = np.concatenate(all_scores)
+        raw = np.concatenate(all_raw)
+        times = np.concatenate(all_times)
+        win_scales = np.concatenate(all_scales)
+
+        best = int(np.argmax(normed))
+        hit_idx = np.where(normed >= threshold)[0]
+        detections = [{"time": float(times[i]),
+                       "score": float(normed[i]),
+                       "raw_cos": float(raw[i]),
+                       "scale": float(win_scales[i])} for i in hit_idx]
+
+        chunk_record = {"file": filename,
+                        "n_windows": n_windows,
+                        "best_score": float(normed[best]),
+                        "best_raw_cos": float(raw[best]),
+                        "best_time": float(times[best]),
+                        "best_scale": float(win_scales[best]),
+                        "detections": detections}
+        results["chunks"].append(chunk_record)
+
+        if len(hit_idx) > 0:
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            msg = (f"[{stamp}] Match found! AS-norm score: {normed[best]:.2f} "
+                   f"(cos {raw[best]:.3f}, threshold {threshold:.2f}, "
+                   f"scale {win_scales[best]:.1f}x) | "
+                   f"Chunk: {filename} at {times[best]:.1f}s "
+                   f"({len(hit_idx)} windows above threshold)")
+            print(msg)
+            with open(log_path, "a") as f:
+                f.write(msg + "\n")
+        else:
+            print(f"Processed {filename} - no match. "
+                  f"(best AS-norm {normed[best]:.2f} at {times[best]:.1f}s, "
+                  f"cos {raw[best]:.3f}, scale {win_scales[best]:.1f}x)")
+
+    with open(json_path, "w") as f:
+        json.dump(results, f, indent=2)
+    n_hits = sum(1 for c in results["chunks"] if c.get("detections"))
+    print(f"\nDone. {n_hits}/{len(audio_files)} chunks contained detections.")
+    print(f"Results: {json_path}")
+
 
 if __name__ == "__main__":
-    base_path = r"d:\Video Context Extraction System\Siamese_VMS_Project"
-    
-    # Locate keyword
-    keyword_file = os.path.join(base_path, "selected_keyword.txt")
-    if not os.path.exists(keyword_file):
-        print("Keyword file not found. Run transcriber.py first.")
-        exit()
-        
-    with open(keyword_file, "r") as f:
-        keyword = f.read().strip()
-        
-    keyword_audio_path = os.path.join(base_path, "keywords", f"{keyword}.wav")
-    live_audio_dir = os.path.join(base_path, "audios")
-    output_log_path = os.path.join(base_path, "logs", f"timestamps_{keyword}.txt")
-    
-    if not os.path.exists(keyword_audio_path):
-        print(f"Keyword audio {keyword_audio_path} not found. Run keyword_generator.py first.")
-        exit()
-        
-    run_detection(keyword_audio_path, live_audio_dir, output_log_path, threshold=0.75)
+    ap = argparse.ArgumentParser(description="AS-norm keyword detector.")
+    ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
+    ap.add_argument("--anchor-audio", default=None,
+                    help="optional recorded anchor (wav/m4a) instead of the TTS centroid")
+    ap.add_argument("--threshold", type=float, default=None,
+                    help="override the calibrated AS-norm threshold")
+    ap.add_argument("--step", type=float, default=0.05, help="window hop in seconds")
+    ap.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
+    ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--scales", default="0.6,0.8,1.0",
+                    help="comma-separated window scales relative to the anchor duration")
+    args = ap.parse_args()
+
+    keyword = args.keyword
+    if keyword is None:
+        kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
+        if not os.path.exists(kw_file):
+            print("No --keyword given and selected_keyword.txt not found. Run transcriber.py first.")
+            raise SystemExit(1)
+        keyword = open(kw_file).read().strip()
+
+    run_detection(keyword, anchor_audio=args.anchor_audio, threshold=args.threshold,
+                  step_seconds=args.step, top_k=args.top_k, batch_size=args.batch_size,
+                  scales=tuple(float(s) for s in args.scales.split(",")))

@@ -24,7 +24,13 @@ ENV/
 env/
 .venv/
 
+# --- Audio_KWS local caches ---
+Audio_KWS/.cache/
+Audio_KWS/query_cache/
+Audio_KWS/benchmark_data/
+
 # --- VMS runtime output / media / model artifacts ---
+Siamese_VMS_Project/cohort*.npz
 *.wav
 *.mp4
 *.h5
@@ -32,6 +38,14 @@ env/
 *.onnx
 *.engine
 VMS/
+
+# --- Generated KWS artifacts (rebuildable from the pipeline) ---
+Siamese_VMS_Project/keywords/
+Siamese_VMS_Project/logs/detections_*.json
+Siamese_VMS_Project/transcripts.txt
+
+# --- ASR project runtime scratch ---
+ASR_VMS_Project/work/
 
 # --- OS ---
 Thumbs.db

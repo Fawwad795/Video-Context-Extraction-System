@@ -1,0 +1,12 @@
+whisperx
+torch
+torchaudio
+librosa
+soundfile
+moviepy
+imageio-ffmpeg
+streamlink
+m3u8
+jellyfish
+rapidfuzz
+numpy
