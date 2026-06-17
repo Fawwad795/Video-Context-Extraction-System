@@ -31,9 +31,11 @@ def list_chunks(audio_dir):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Transcribe chunks with whisper-tiny.")
+    ap = argparse.ArgumentParser(description="Transcribe chunks with Whisper.")
     ap.add_argument("--audio-dir", default=os.path.join(HERE, "new_chunks", "audios"))
     ap.add_argument("--out", default=None)
+    ap.add_argument("--model", default="openai/whisper-tiny",
+                    help="e.g. openai/whisper-base, openai/whisper-small (more accurate)")
     args = ap.parse_args()
     out = args.out or os.path.join(os.path.dirname(args.audio_dir), "transcripts.txt")
 
@@ -42,9 +44,9 @@ def main():
         print(f"No .wav files in {args.audio_dir}")
         return
 
-    print("Loading whisper-tiny...")
+    print(f"Loading {args.model}...")
     from transformers import pipeline
-    asr = pipeline("automatic-speech-recognition", model="openai/whisper-tiny")
+    asr = pipeline("automatic-speech-recognition", model=args.model)
 
     lines = [f"Chunk transcripts - generated {datetime.now():%Y-%m-%d %H:%M:%S}",
              f"Source: {args.audio_dir} ({len(files)} chunks)", ""]
