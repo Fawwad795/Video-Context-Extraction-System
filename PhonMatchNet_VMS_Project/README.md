@@ -74,14 +74,37 @@ python -m venv .venv-g2p
 .venv-g2p\Scripts\python -c "import nltk; [nltk.download(p) for p in ['averaged_perceptron_tagger_eng','averaged_perceptron_tagger','cmudict']]"
 
 # detect a typed keyword in a folder of chunks (with optional ground truth for F1)
-.venv-g2p\Scripts\python detect.py --keyword penalty \
-    --audio-dir ..\Siamese_VMS_Project\audios \
-    --ground-truth live_4.wav,live_7.wav --threshold 0.99
+.venv-g2p\Scripts\python detect.py --keyword trump \
+    --audio-dir new_chunks\audios \
+    --ground-truth live_0.wav,live_9.wav --threshold 0.4
 ```
 
-Verified locally (CPU): reproduces the AWS scores exactly — `penalty` F1=1.00 @0.99,
-`elon` F1=1.00 @0.4. Thresholds differ per keyword (the next step is automatic
-per-keyword calibration).
+## End-to-end workflow (self-contained)
+
+This folder also carries the supporting **infra** (download + transcribe), copied
+from the Siamese project and decoupled from it, so the whole pipeline runs here:
+
+```bash
+# 1. download fresh stream chunks -> new_chunks/audios
+python downloader.py --n 10
+
+# 2. transcribe them (ground-truth reference) -> new_chunks/transcripts.txt
+python transcribe_chunks.py
+
+# 3. read the transcripts, pick a keyword + note which chunks contain it, then detect
+.venv-g2p\Scripts\python detect.py --keyword <word> --audio-dir new_chunks\audios \
+    --ground-truth <wavs> --threshold 0.5
+```
+
+Steps 1–2 (`downloader.py`, `transcribe_chunks.py`) need `streamlink`/`moviepy`/
+`transformers` — run them in your system Python or `requirements-infra.txt`. Step 3
+(`detect.py`) runs in the dedicated `.venv-g2p`.
+
+Notes from real runs: results vary by keyword. `penalty`/`elon`/`trump` rank the true
+chunk #1 (clean detection); but short proper nouns (`iran` -> 0.000) and close
+phonetic confusables (`published` vs **`public`**) still fail — consistent with the
+~28% LP-Hard EER. Per-keyword thresholds also differ (the next step is automatic
+calibration; confusable ranking failures need a stronger model / +360h training).
 
 ## Files
 

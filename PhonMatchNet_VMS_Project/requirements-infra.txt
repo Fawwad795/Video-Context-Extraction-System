@@ -1,0 +1,9 @@
+# Dependencies for the infra scripts (downloader.py, transcribe_chunks.py).
+# These are separate from the detector env (.venv-g2p / requirements-g2p.txt).
+# Your system Python likely already has these; otherwise install into any env:
+#   pip install -r requirements-infra.txt
+streamlink
+m3u8
+moviepy
+transformers
+torch
