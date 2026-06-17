@@ -60,20 +60,44 @@ The true keyword now ranks **#1** in both cases (penalty: true 0.994 > all impos
 elon: true 0.515 > all impostors). Caveats: small test (2 keywords, 7 unique chunks),
 and per-keyword thresholds differ — production use needs per-keyword calibration.
 
+## Run locally (recommended) — `detect.py`
+
+A **self-contained, portable detector** that runs on a normal PC (no docker, no AWS).
+It does both stages in one process: TensorFlow computes the Google Speech embedding,
+PyTorch runs PhonMatchNet, and it reports per-chunk detection + F1.
+
+```bash
+cd G2P_VMS_Project
+python -m venv .venv-g2p
+.venv-g2p\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv-g2p\Scripts\python -m pip install -r requirements-g2p.txt
+.venv-g2p\Scripts\python -c "import nltk; [nltk.download(p) for p in ['averaged_perceptron_tagger_eng','averaged_perceptron_tagger','cmudict']]"
+
+# detect a typed keyword in a folder of chunks (with optional ground truth for F1)
+.venv-g2p\Scripts\python detect.py --keyword penalty \
+    --audio-dir ..\Siamese_VMS_Project\audios \
+    --ground-truth live_4.wav,live_7.wav --threshold 0.99
+```
+
+Verified locally (CPU): reproduces the AWS scores exactly — `penalty` F1=1.00 @0.99,
+`elon` F1=1.00 @0.4. Thresholds differ per keyword (the next step is automatic
+per-keyword calibration).
+
 ## Files
 
-- `vms_gemb.py` — **Stage A** (run in the TF `preprocess` docker): resample the VMS
-  chunks to 16 kHz, slide 1.5 s windows, compute Google Speech embeddings → `vms_gemb.npz`.
-- `vms_infer.py` — **Stage B** (run in the `udkws_torch` docker): load the trained model,
-  G2P-embed the keyword, score each window, max-pool per chunk, sweep threshold for F1.
-- `phonmatchnet_model/phonmatchnet_epoch13.pt` — the trained model (best overall EER,
-  loads with `BaseUKWS(vocab=72, audio_input='both', text_input='g2p_embed',
-  stack_extractor=True, ...)`).
+- `detect.py` — **portable local detector** (both stages in one process; typed keyword
+  → per-chunk detection + F1). The recommended entry point.
+- `phonmatchnet/` — **vendored** PhonMatchNet inference code from
+  [ncsoft/PhonMatchNet](https://github.com/ncsoft/PhonMatchNet) (BSD-3, see
+  `phonmatchnet/LICENSE.txt`): `model/` (architecture), `dataset/g2p/` (grapheme→phoneme),
+  `google_speech_embedding/` (the TF embedder + checkpoint). One local patch: `ukws.py`
+  resolves `lin_to_mel_matrix.npy` relative to its own file (cwd-independent).
+- `phonmatchnet_model/phonmatchnet_epoch13.pt` — the trained model (best overall EER).
+- `requirements-g2p.txt` — the local environment (torch + TensorFlow 2.15 + audio deps).
+- `vms_gemb.py` / `vms_infer.py` — the original two-stage **docker** scripts used on the
+  AWS training host (kept for reproducing the benchmark there).
 
-## Reproduce
-
-Both scripts run inside the upstream PhonMatchNet docker images on the training host
-(repo mounted at `/home`, chunks at `/c`, output at `/out`):
+## Reproduce on the AWS training host (docker)
 
 ```bash
 # Stage A — Google embeddings (TF docker)

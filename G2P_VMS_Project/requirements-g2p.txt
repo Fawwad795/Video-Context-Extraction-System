@@ -1,0 +1,13 @@
+# Local environment for the PhonMatchNet G2P detector (detect.py).
+# Install into a dedicated venv to avoid clashing with other TF/torch setups:
+#   python -m venv .venv-g2p
+#   .venv-g2p\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   .venv-g2p\Scripts\python -m pip install -r requirements-g2p.txt
+torch
+tensorflow==2.15.0
+numpy<2
+librosa
+soundfile
+scipy
+nltk
+inflect
