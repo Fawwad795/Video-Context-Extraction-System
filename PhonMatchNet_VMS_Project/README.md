@@ -91,20 +91,32 @@ python downloader.py --n 10
 # 2. transcribe them (ground-truth reference) -> new_chunks/transcripts.txt
 python transcribe_chunks.py
 
-# 3. read the transcripts, pick a keyword + note which chunks contain it, then detect
-.venv-g2p\Scripts\python detect.py --keyword <word> --audio-dir new_chunks\audios \
-    --ground-truth <wavs> --threshold 0.5
+# 3. calibrate a per-keyword threshold from a NEGATIVE cohort (speech without the keyword)
+.venv-g2p\Scripts\python calibrate.py --keyword <word> --cohort-dir <negative_audio> --fa-percentile 99
+
+# 4. detect — uses the calibrated threshold automatically (override with --threshold)
+.venv-g2p\Scripts\python detect.py --keyword <word> --audio-dir new_chunks\audios --ground-truth <wavs>
 ```
 
 Steps 1–2 (`downloader.py`, `transcribe_chunks.py`) need `streamlink`/`moviepy`/
-`transformers` — run them in your system Python or `requirements-infra.txt`. Step 3
-(`detect.py`) runs in the dedicated `.venv-g2p`.
+`transformers` — run them in your system Python or `requirements-infra.txt`. Steps 3–4
+(`calibrate.py`, `detect.py`) run in the dedicated `.venv-g2p`.
+
+### Per-keyword thresholds (`calibrate.py`)
+Different keywords fire at different score scales (penalty ~0.99, trump ~0.2), so a
+single global threshold can't work. `calibrate.py` scores the keyword against a cohort
+of negative audio and stores the high-percentile score in `calibration.json`, which
+`detect.py` loads automatically. **This fixes the threshold *scale*, not ranking
+inversions** — its ceiling is the model's reliability: if a negative spuriously
+out-scores a true positive (e.g. a chunk scoring 0.97 for "trump"), the percentile
+threshold rises and misses weak true positives. Use a **large, clean** negative cohort,
+and remember the remaining errors (confusables, spurious highs) need a stronger model
+(+train-clean-360 / MM-KWS), not more threshold tuning.
 
 Notes from real runs: results vary by keyword. `penalty`/`elon`/`trump` rank the true
-chunk #1 (clean detection); but short proper nouns (`iran` -> 0.000) and close
-phonetic confusables (`published` vs **`public`**) still fail — consistent with the
-~28% LP-Hard EER. Per-keyword thresholds also differ (the next step is automatic
-calibration; confusable ranking failures need a stronger model / +360h training).
+chunk #1 (clean); short proper nouns (`iran` -> 0.000), confusables (`published` vs
+**`public`**), and spurious highs (`bloomberg`) still fail — consistent with ~28%
+LP-Hard EER.
 
 ## Files
 

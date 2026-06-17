@@ -60,6 +60,7 @@ ASR_VMS_Project/work/
 PhonMatchNet_VMS_Project/vms_out/
 PhonMatchNet_VMS_Project/*.npz
 PhonMatchNet_VMS_Project/new_chunks/
+PhonMatchNet_VMS_Project/calibration.json
 # keep the small trained model (deliverable) despite the global *.pt ignore
 !PhonMatchNet_VMS_Project/phonmatchnet_model/phonmatchnet_epoch13.pt
 

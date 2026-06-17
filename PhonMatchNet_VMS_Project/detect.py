@@ -29,6 +29,19 @@ sys.path.insert(0, os.path.join(PM, "google_speech_embedding"))  # -> speech_emb
 
 SR, WIN, HOP, MAXLEN_A, FRAME, HOPL = 16000, 24000, 8000, 32000, 400, 160
 CKPT = os.path.join(HERE, "phonmatchnet_model", "phonmatchnet_epoch13.pt")
+CALIB = os.path.join(HERE, "calibration.json")  # per-keyword thresholds (from calibrate.py)
+
+
+def resolve_threshold(keyword, explicit):
+    """explicit --threshold wins; else a calibrated per-keyword threshold; else 0.5."""
+    import json
+    if explicit is not None:
+        return explicit, "explicit"
+    if os.path.exists(CALIB):
+        calib = json.load(open(CALIB))
+        if keyword.lower() in calib:
+            return float(calib[keyword.lower()]), "calibrated"
+    return 0.5, "default (uncalibrated — run calibrate.py)"
 
 
 def gemb_len_of(x_len):
@@ -107,7 +120,8 @@ def main():
     ap.add_argument("--keyword", required=True)
     ap.add_argument("--audio-dir", default=None, help="folder of .wav chunks")
     ap.add_argument("--wav", default=None, help="a single .wav")
-    ap.add_argument("--threshold", type=float, default=0.5)
+    ap.add_argument("--threshold", type=float, default=None,
+                    help="override; default uses calibration.json for the keyword, else 0.5")
     ap.add_argument("--ground-truth", default=None,
                     help="comma-separated wav names that contain the keyword (for F1)")
     args = ap.parse_args()
@@ -128,11 +142,12 @@ def main():
     model = load_model()
     scores = score_chunks(model, gemb_data, args.keyword)
 
+    thr, thr_src = resolve_threshold(args.keyword, args.threshold)
     gt = set(args.ground_truth.split(",")) if args.ground_truth else None
-    print(f"\nKeyword '{args.keyword}'  (threshold {args.threshold}):")
+    print(f"\nKeyword '{args.keyword}'  (threshold {thr:.3f} — {thr_src}):")
     tp = fp = fn = tn = 0
     for name in sorted(scores, key=_chunk_order):
-        det = scores[name] >= args.threshold
+        det = scores[name] >= thr
         line = f"  {name}: score={scores[name]:.3f}  {'DETECTED' if det else '-'}"
         if gt is not None:
             truth = name in gt
