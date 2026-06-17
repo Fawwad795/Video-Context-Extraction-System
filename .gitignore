@@ -56,11 +56,11 @@ Siamese_VMS_Project/pretrained_models/
 # --- ASR project runtime scratch ---
 ASR_VMS_Project/work/
 
-# --- G2P (PhonMatchNet) approach ---
-G2P_VMS_Project/vms_out/
-G2P_VMS_Project/*.npz
+# --- PhonMatchNet (G2P / query-by-text) approach ---
+PhonMatchNet_VMS_Project/vms_out/
+PhonMatchNet_VMS_Project/*.npz
 # keep the small trained model (deliverable) despite the global *.pt ignore
-!G2P_VMS_Project/phonmatchnet_model/phonmatchnet_epoch13.pt
+!PhonMatchNet_VMS_Project/phonmatchnet_model/phonmatchnet_epoch13.pt
 
 # --- OS ---
 Thumbs.db

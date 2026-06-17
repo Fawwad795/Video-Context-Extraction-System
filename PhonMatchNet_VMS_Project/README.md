@@ -67,7 +67,7 @@ It does both stages in one process: TensorFlow computes the Google Speech embedd
 PyTorch runs PhonMatchNet, and it reports per-chunk detection + F1.
 
 ```bash
-cd G2P_VMS_Project
+cd PhonMatchNet_VMS_Project
 python -m venv .venv-g2p
 .venv-g2p\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 .venv-g2p\Scripts\python -m pip install -r requirements-g2p.txt
