@@ -10,6 +10,7 @@ Extension/
 Published_Paper_Reads_For_Extension/
 AI_Detector_Implementation_Plan.md
 APPROACH_COMPARISON.md
+*.pdf
 
 # --- Python ---
 __pycache__/
