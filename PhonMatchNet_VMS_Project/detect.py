@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(PM, "dataset"))         # -> from g2p.g2p_en.g2p
 sys.path.insert(0, os.path.join(PM, "google_speech_embedding"))  # -> speech_embedding
 
 SR, WIN, HOP, MAXLEN_A, FRAME, HOPL = 16000, 24000, 8000, 32000, 400, 160
-CKPT = os.path.join(HERE, "phonmatchnet_model", "phonmatchnet_epoch13.pt")
+CKPT = os.path.join(HERE, "phonmatchnet_model", "phonmatchnet_epoch26.pt")
 CALIB = os.path.join(HERE, "calibration.json")  # per-keyword thresholds (from calibrate.py)
 
 
