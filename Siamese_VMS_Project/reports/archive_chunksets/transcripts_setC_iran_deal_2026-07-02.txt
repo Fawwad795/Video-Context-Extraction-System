@@ -1,0 +1,32 @@
+Chunk transcripts - generated 2026-06-23 01:13:34
+Source: D:\Video Context Extraction System\PhonMatchNet_VMS_Project\new_chunks\audios (10 chunks)
+
+[live_0.wav]
+often citing very credible sources, some of them from within the Trump administration.
+
+[live_1.wav]
+We've heard from Bloomberg, and from CNN, for example, in the last few hours.
+
+[live_2.wav]
+immigration always dismisses those reports, as indeed does the government in
+
+[live_3.wav]
+Tehran. In addition to all of that, we're being told this deal will be published in full
+
+[live_4.wav]
+on Friday, but a state linked news agency in Iran says as part
+
+[live_5.wav]
+art of the day, the two sides have agreed that it will never actually be published.
+
+[live_6.wav]
+on Friday, but a state linked news agency in Iran says as part
+
+[live_7.wav]
+art of the day, the two sides have agreed that it will never actually be published.
+
+[live_8.wav]
+Why would you not want to put into the public domain such a diplomatic achievement?
+
+[live_9.wav]
+are the logistics. It's our understanding that President Trump plans to return to Washington

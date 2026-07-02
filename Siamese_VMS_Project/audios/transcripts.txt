@@ -1,32 +1,32 @@
-Chunk transcripts - generated 2026-06-23 01:13:34
-Source: D:\Video Context Extraction System\PhonMatchNet_VMS_Project\new_chunks\audios (10 chunks)
+Chunk transcripts - generated 2026-07-02 22:32:20
+Source directory: audios/ (10 chunks)
 
 [live_0.wav]
-often citing very credible sources, some of them from within the Trump administration.
+it will be fairly mild overall. Tomorrow morning looks dry and sunny for many but normal.
 
 [live_1.wav]
-We've heard from Bloomberg, and from CNN, for example, in the last few hours.
+Northern Ireland and Western parts of both Scotland and Ireland will be quite cloudy with some patterns.
 
 [live_2.wav]
-immigration always dismisses those reports, as indeed does the government in
+She liked rain. The North of Ireland and Northern Ireland will see more prolonged outbreaks.
 
 [live_3.wav]
-Tehran. In addition to all of that, we're being told this deal will be published in full
+moving in by midday some heavy it'll be a bit warmer and windy in the north
 
 [live_4.wav]
-on Friday, but a state linked news agency in Iran says as part
+Northwest Northern England and Southern Scotland will turn wet later while the north of
 
 [live_5.wav]
-art of the day, the two sides have agreed that it will never actually be published.
+Island will largely dry up. North West and Scotland will brighten up elsewhere in most places.
 
 [live_6.wav]
-on Friday, but a state linked news agency in Iran says as part
+is look fine, but the south of Ireland can expect a few showers. Saturday, look
 
 [live_7.wav]
-art of the day, the two sides have agreed that it will never actually be published.
+It's warm but fairly cloudy with outbreaks of rain in the north.
 
 [live_8.wav]
-Why would you not want to put into the public domain such a diplomatic achievement?
+All clear travel insurance proudly sponsors Sky News weather.
 
 [live_9.wav]
-are the logistics. It's our understanding that President Trump plans to return to Washington
+You're watching the news out coming up Russia is accused of using
