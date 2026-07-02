@@ -1,75 +1,97 @@
-# Siamese VMS — Zero-Shot Keyword Spotting in Live Video Streams
+# Siamese VMS - Zero-Shot Keyword Spotting in Live Video Streams
 
-## What this project does (plain English)
+## What This Project Does
 
-Give the system a **word** and a **live video/audio stream**, and it tells you
-*when that word gets spoken* — without ever running a full speech-to-text
+Give the system a **word** and a **live video/audio stream**, and it tells
+you when that word gets spoken, without ever running a full speech-to-text
 transcript, and without any recording of that word said in that exact voice.
 
 You type a keyword like `"washington"`. The system:
 1. **Imagines** how that word sounds using text-to-speech (many synthetic
    voices, not a real recording).
 2. **Repaints** that imagined sound into something that sounds like it came
-   from *this specific stream* (same speaker/mic/room tone).
+   from this specific stream (same speaker/mic/room tone).
 3. **Scans** the live audio in small time-slices, comparing each slice's
    "sound fingerprint" to the keyword's fingerprint.
 4. **Double-checks** every promising slice by asking "does this actually
-   contain the keyword's spoken sounds?" — not just "does it sound similar?"
+   contain the keyword's spoken sounds?", not just "does it sound similar?"
 
 The result: it can catch a keyword nobody ever recorded, spoken by a
 newsreader nobody trained the system on, inside a live stream it has never
-seen — with no live transcription step slowing things down.
+seen, with no live transcription step slowing things down.
 
-## Why this is hard (the core problem)
+## Why This Is Hard (The Core Problem)
 
-The obvious approach — synthesize the keyword with TTS, then check "does
-this window of live audio sound like my synthetic clip?" — mostly doesn't
+The obvious approach (synthesize the keyword with TTS, then check "does
+this window of live audio sound like my synthetic clip?") mostly doesn't
 work. A computer-generated voice and a real human voice look completely
 different to a neural network, even when they're saying the exact same
-word. It's like trying to recognize a friend's face using only a
-cartoon drawing of them: the *shape* is the same, but a face-recognition
-model trained on real photos may not see the resemblance at all. We call
-this the **synthetic-to-real domain gap**, and it was the single biggest
+word. It's like trying to recognize a friend's face using only a cartoon
+drawing of them: the shape is the same, but a face-recognition model
+trained on real photos may not see the resemblance at all. We call this
+the **synthetic-to-real domain gap**, and it was the single biggest
 failure mode in this project (see [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md)
 for the measured failures: F1 = 0.00 on conversational speech with a raw
 TTS anchor).
 
-## How it works (the three-stage pipeline)
+## How It Works: The Three-Stage Pipeline
 
+```mermaid
+flowchart TD
+    KW(["Keyword text<br/><b>e.g. 'washington'</b>"])
+    STREAM(["Live stream audio<br/><b>10 chunks</b>"])
+    RESULT(["Confirmed detections<br/><b>+ timestamps</b>"])
+
+    subgraph S1["STAGE 1 &nbsp; Anchor Building"]
+        direction TB
+        TTS["Synthesize the keyword<br/>~30 TTS voices"]
+        CENTROID["Average into an<br/>L2-normalized centroid"]
+        KNNVC["kNN-VC voice conversion<br/>re-voiced into the stream's own sound"]
+        TTS --> CENTROID --> KNNVC
+    end
+
+    subgraph S2["STAGE 2 &nbsp; Detection"]
+        direction TB
+        SLIDE["Slide a window across the audio<br/>0.6x / 0.8x / 1.0x scales"]
+        EMBED["Siamese embedding<br/>wav2vec2 backbone + projection head"]
+        ASNORM["Adaptive S-norm scoring<br/>vs. an impostor cohort"]
+        SLIDE --> EMBED --> ASNORM
+    end
+
+    subgraph S3["STAGE 3 &nbsp; Verification"]
+        direction TB
+        CTC["CTC phoneme decode<br/>wav2vec2-espeak"]
+        MATCH["Match against the<br/>keyword's phoneme sequence"]
+        CTC --> MATCH
+    end
+
+    KW --> TTS
+    STREAM -. reference audio .-> KNNVC
+    KNNVC --> EMBED
+    STREAM --> SLIDE
+    ASNORM -- "candidate windows" --> CTC
+    MATCH --> RESULT
+
+    classDef io fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#581c87,font-weight:bold
+    classDef stage1 fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef stage2 fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef stage3 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+
+    class KW,STREAM,RESULT io
+    class TTS,CENTROID,KNNVC stage1
+    class SLIDE,EMBED,ASNORM stage2
+    class CTC,MATCH stage3
+
+    style S1 fill:#f0f9ff,stroke:#0284c7,stroke-width:2px
+    style S2 fill:#fffbeb,stroke:#d97706,stroke-width:2px
+    style S3 fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
 ```
-  keyword text                    live stream audio (10 chunks)
-       │                                    │
-       ▼                                    │
- ┌─────────────┐                            │
- │  1. ANCHOR  │  many TTS voices  ──►  kNN  │
- │  BUILDING   │  say the keyword    voice-  │
- │             │                     convert │
- └──────┬──────┘  into the stream's own voice│
-        │                                    │
-        ▼                                    ▼
- ┌─────────────────────────────────────────────────┐
- │  2. DETECTION - Siamese network + AS-norm        │
- │  slide a small window across the audio, embed    │
- │  each slice, compare to the anchor, normalize     │
- │  the score against a cohort of "not the keyword"  │
- └──────────────────────┬────────────────────────────┘
-                         │  candidate time-stamps
-                         ▼
- ┌─────────────────────────────────────────────────┐
- │  3. VERIFICATION - phoneme check                  │
- │  decode each candidate's actual speech sounds      │
- │  (CTC phoneme recognizer) and require them to      │
- │  match the keyword's phoneme sequence               │
- └──────────────────────┬────────────────────────────┘
-                         ▼
-                confirmed detections + timestamps
-```
 
-### Stage 1 — Anchor building (bridging the domain gap)
+### Stage 1: Anchor Building (Bridging the Domain Gap)
 
-**Plain English:** we can't record a human saying every possible keyword in
-advance, so we fake it with text-to-speech — but a *robot voice* comparison
-against *real human* audio doesn't work well (the domain gap above). So we
+**Intuition:** we can't record a human saying every possible keyword in
+advance, so we fake it with text-to-speech, but a robot-voice comparison
+against real human audio doesn't work well (the domain gap above). So we
 take the extra step of re-voicing the synthetic clip so it sounds like it
 came from the actual stream.
 
@@ -83,16 +105,17 @@ and averages into an L2-normalized **centroid anchor**. Then
 regression + a prematched HiFi-GAN vocoder, no training required), using
 non-keyword segments of the live stream as the voice reference. Every output
 frame is literally reassembled from real stream audio, so the converted
-anchor sits in the *real* acoustic domain instead of the *synthetic* one.
+anchor sits in the real acoustic domain instead of the synthetic one.
 Chunks that contain the keyword are excluded from the reference pool to
 avoid leaking the answer into the anchor.
 
-### Stage 2 — Detection (Siamese network + adaptive scoring)
+### Stage 2: Detection (Siamese Network + Adaptive Scoring)
 
-**Plain English:** slide a small window across the audio, ask a neural
-network "does this sound like the keyword?", and flag the windows that do —
-but calibrate "does" relative to what background speech normally scores, not
-a fixed number, so accents/pace/room acoustics don't need re-tuning by hand.
+**Intuition:** slide a small window across the audio, ask a neural network
+"does this sound like the keyword?", and flag the windows that do, but
+calibrate "does" relative to what background speech normally scores
+instead of a fixed number, so accents, pace, and room acoustics don't need
+re-tuning by hand.
 
 **Technical:** the backbone is `facebook/wav2vec2-base` (frozen) feeding a
 trained 256-d L2-normalized projection head (`core/siamese_model.py`,
@@ -100,43 +123,44 @@ trained 256-d L2-normalized projection head (`core/siamese_model.py`,
 scales (0.6x/0.8x/1.0x of the anchor duration, since spoken pace varies) and
 scores each by cosine similarity, then applies **Adaptive S-norm**:
 
-```
-s_norm = 0.5 * ( (s - mu_a)/sd_a  +  (s - mu_w)/sd_w )
-```
+$$
+s_{\text{norm}} = \frac{1}{2}\left(\frac{s - \mu_a}{\sigma_a} + \frac{s - \mu_w}{\sigma_w}\right)
+$$
 
-where `(mu_a, sd_a)` and `(mu_w, sd_w)` are the top-k closest-impostor
-statistics from a per-keyword cohort (`pipeline/cohort_builder.py`) on the
-anchor side and the window side respectively. The accept threshold is fitted
-per keyword by `pipeline/calibrate.py` as an empirical false-alarm
-percentile on that cohort (not a hand-picked distance). The detector also
-keeps its top-8 non-maximum-suppressed windows per chunk as "candidates"
-regardless of threshold, so stage 3 can rescue a true detection that scored
-just under the line.
+where $(\mu_a, \sigma_a)$ and $(\mu_w, \sigma_w)$ are the mean and standard
+deviation of the top-$k$ closest-impostor scores from a per-keyword cohort
+(`pipeline/cohort_builder.py`), computed on the anchor side and the window
+side respectively. The accept threshold is fitted per keyword by
+`pipeline/calibrate.py` as an empirical false-alarm percentile on that
+cohort, not a hand-picked distance. The detector also keeps its top-8
+non-maximum-suppressed windows per chunk as "candidates" regardless of
+threshold, so Stage 3 can rescue a true detection that scored just under
+the line.
 
-### Stage 3 — Verification (phoneme precision filter)
+### Stage 3: Verification (Phoneme Precision Filter)
 
-**Plain English:** the detector's "sounds similar" test can be fooled by
-unrelated phrases that happen to have a similar overall shape (e.g. two
-different sentences that are both fast and low-pitched). So every candidate
-gets a second, completely different check: what *speech sounds* does it
-actually contain, and do they match the keyword's?
+**Intuition:** the detector's "sounds similar" test can be fooled by
+unrelated phrases that happen to have a similar overall shape (for example,
+two different sentences that are both fast and low-pitched). So every
+candidate gets a second, completely different check: what speech sounds
+does it actually contain, and do they match the keyword's?
 
 **Technical:** `pipeline/verify_detections.py` CTC-decodes each candidate
 window with `facebook/wav2vec2-lv-60-espeak-cv-ft` into an IPA phoneme
 sequence, and compares it (infix edit distance, free ends) against
 references decoded from the anchor clips. This model is trained to predict
-*phonemes*, not speaker or recording identity, so its output is invariant to
-the exact domain gap that Stage 1 works around — TTS and kNN-VC-converted
+phonemes, not speaker or recording identity, so its output is invariant to
+the exact domain gap that Stage 1 works around: TTS and kNN-VC-converted
 clips of the same word decode to identical phoneme strings. The accept
 threshold is the midpoint between the negative (random stream window)
 phone-similarity percentile and the references' own leave-one-out
 self-similarity, floored at 0.5.
 
-## Does it actually work? (validation results)
+## Does It Actually Work? (Validation Results)
 
 The clearest evidence is the most recent validation run, on a chunk set
 (Sky News weather bulletin) the pipeline had never been tuned against, with
-four keywords deliberately chosen to span difficulty — not cherry-picked:
+four keywords deliberately chosen to span difficulty, not cherry-picked:
 
 | Keyword | Difficulty | Precision | Recall | F1 |
 |---|---|---|---|---|
@@ -147,8 +171,8 @@ four keywords deliberately chosen to span difficulty — not cherry-picked:
 | **Aggregate (40 chunk decisions)** | | **0.875** | **0.875** | **0.875** |
 
 Both remaining errors trace to a single borderline chunk, not a systemic
-failure — full breakdown, per-chunk detail, and every historical experiment
-(including the F1 = 0.00 domain-gap failures that motivated stages 1 and 3)
+failure. Full breakdown, per-chunk detail, and every historical experiment
+(including the F1 = 0.00 domain-gap failures that motivated Stages 1 and 3)
 are in [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
 
 ## Project Layout
@@ -157,10 +181,10 @@ are in [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
 Siamese_VMS_Project/
 ├── core/         shared modules: siamese_model.py (network), scoring.py (embedding,
 │                 AS-norm, cohort utils), augment_utils.py (audio augmentation)
-├── pipeline/     the detection pipeline, in run order: downloader.py → transcribe_chunks.py
-│                 (or transcriber.py) → keyword_generator.py → convert_anchor_knnvc.py
-│                 (recommended) → cohort_builder.py → calibrate.py → detector.py →
-│                 verify_detections.py (phoneme precision filter) → validate_detection.py
+├── pipeline/     the detection pipeline, in run order: downloader.py -> transcribe_chunks.py
+│                 (or transcriber.py) -> keyword_generator.py -> convert_anchor_knnvc.py
+│                 (recommended) -> cohort_builder.py -> calibrate.py -> detector.py ->
+│                 verify_detections.py (phoneme precision filter) -> validate_detection.py
 │                 (+ denoise_chunks.py utility)
 ├── training/     offline model training (AWS): train_siamese.py (Phase 1),
 │                 train_siamese_v2.py + dataset_v2.py + tts_bank.py (Phase 2 GRL),
@@ -175,19 +199,24 @@ Siamese_VMS_Project/
 
 Run pipeline scripts from the project root, e.g. `python pipeline/detector.py --keyword washington`.
 
-## Model architecture (Siamese network)
+## Model Architecture (Siamese Network)
 
-- **Feature Extractor (Backbone):** `facebook/wav2vec2-base`, frozen — a
+- **Feature Extractor (Backbone):** `facebook/wav2vec2-base` (frozen), a
   pre-trained self-supervised speech model that turns raw audio into robust
   acoustic features.
 - **Metric Layer (Projection Head):** a trained linear projection head that
   compresses the 768-dimensional wav2vec2 output into a 256-dimensional
   L2-normalized embedding space.
-- **Loss Function:** `TripletMarginLoss(margin=1.0)` — trained on an anchor
-  word, a positive sample (the same word, different speaker), and a
-  negative sample (a different word), pulling same-word embeddings together
-  and pushing different-word embeddings apart.
-- **Training data:** `MLCommons/ml_spoken_words` — 5.1 million short human
+- **Loss Function:** $\text{TripletMarginLoss}(\text{margin}=1.0)$, trained
+  on an anchor word, a positive sample (the same word, different speaker),
+  and a negative sample (a different word), pulling same-word embeddings
+  together and pushing different-word embeddings apart:
+
+$$
+\mathcal{L} = \max\big(0,\ d(a, p) - d(a, n) + \text{margin}\big)
+$$
+
+- **Training data:** `MLCommons/ml_spoken_words`, 5.1 million short human
   speech clips, on AWS `g6.xlarge` (NVIDIA L4) with a 500 GB EBS volume for
   dataset caching. The Phase-1 baseline converged to a validation loss of
   ~0.29 over 50 epochs. A Phase-2 run added a gradient-reversal
@@ -214,7 +243,7 @@ Run from the project root. Most scripts default `--keyword` to
    ```bash
    python pipeline/keyword_generator.py --keyword washington
    ```
-4. **Convert the anchor into the stream's own voice** (recommended — this
+4. **Convert the anchor into the stream's own voice** (recommended: this
    is what closes the domain gap):
    ```bash
    python pipeline/convert_anchor_knnvc.py --keyword washington
@@ -240,7 +269,7 @@ Run from the project root. Most scripts default `--keyword` to
    python pipeline/validate_detection.py --keyword washington
    ```
 
-For the full experimental history — every keyword tried, every failure mode
-found, and the reasoning behind each fix — see
+For the full experimental history (every keyword tried, every failure mode
+found, and the reasoning behind each fix), see
 [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md) and
 [Reports/SIAMESE_PROGRESS_REPORT.md](Reports/SIAMESE_PROGRESS_REPORT.md).
