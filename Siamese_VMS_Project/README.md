@@ -12,7 +12,8 @@ Siamese_VMS_Project/
 │                 AS-norm, cohort utils), augment_utils.py (audio augmentation)
 ├── pipeline/     the detection pipeline, in run order: downloader.py → transcriber.py →
 │                 keyword_generator.py → convert_anchor_knnvc.py (optional, recommended) →
-│                 cohort_builder.py → calibrate.py → detector.py → validate_detection.py
+│                 cohort_builder.py → calibrate.py → detector.py → verify_detections.py (phoneme
+│                 precision filter) → validate_detection.py
 │                 (+ transcribe_chunks.py, denoise_chunks.py utilities)
 ├── training/     offline model training (AWS): train_siamese.py (Phase 1),
 │                 train_siamese_v2.py + dataset_v2.py + tts_bank.py (Phase 2 GRL),

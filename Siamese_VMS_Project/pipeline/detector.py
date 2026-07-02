@@ -65,7 +65,8 @@ def resolve_threshold(keyword, override):
 
 
 def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
-                  top_k=DEFAULT_TOP_K, batch_size=16, scales=(0.6, 0.8, 1.0)):
+                  top_k=DEFAULT_TOP_K, batch_size=16, scales=(0.6, 0.8, 1.0),
+                  top_candidates=8):
     print("Initializing Siamese AS-norm detector...")
     model = load_siamese_model()
     anchor, window_samples, anchor_desc = load_anchor(keyword, anchor_audio, model)
@@ -131,13 +132,31 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
                        "raw_cos": float(raw[i]),
                        "scale": float(win_scales[i])} for i in hit_idx]
 
+        # Top-N windows regardless of threshold (greedy NMS: skip windows
+        # within 0.25s of an already-kept higher-scoring one). A second-stage
+        # verifier (verify_detections.py) can rescue a true keyword window
+        # whose embedding score fell just below the threshold - stage 1
+        # supplies recall candidates, stage 2 enforces precision.
+        candidates = []
+        for i in np.argsort(-normed):
+            t = float(times[i])
+            if any(abs(t - c["time"]) < 0.25 for c in candidates):
+                continue
+            candidates.append({"time": t,
+                               "score": float(normed[i]),
+                               "raw_cos": float(raw[i]),
+                               "scale": float(win_scales[i])})
+            if len(candidates) >= top_candidates:
+                break
+
         chunk_record = {"file": filename,
                         "n_windows": n_windows,
                         "best_score": float(normed[best]),
                         "best_raw_cos": float(raw[best]),
                         "best_time": float(times[best]),
                         "best_scale": float(win_scales[best]),
-                        "detections": detections}
+                        "detections": detections,
+                        "candidates": candidates}
         results["chunks"].append(chunk_record)
 
         if len(hit_idx) > 0:
@@ -174,6 +193,8 @@ if __name__ == "__main__":
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--scales", default="0.6,0.8,1.0",
                     help="comma-separated window scales relative to the anchor duration")
+    ap.add_argument("--top-candidates", type=int, default=8,
+                    help="top-N NMS windows per chunk saved for the verifier")
     args = ap.parse_args()
 
     keyword = args.keyword
@@ -186,4 +207,5 @@ if __name__ == "__main__":
 
     run_detection(keyword, anchor_audio=args.anchor_audio, threshold=args.threshold,
                   step_seconds=args.step, top_k=args.top_k, batch_size=args.batch_size,
-                  scales=tuple(float(s) for s in args.scales.split(",")))
+                  scales=tuple(float(s) for s in args.scales.split(",")),
+                  top_candidates=args.top_candidates)
