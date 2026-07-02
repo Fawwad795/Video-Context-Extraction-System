@@ -6,7 +6,7 @@ Write-Host "Creating project directory on AWS..."
 ssh -i $key -o StrictHostKeyChecking=no $user@$ip "mkdir -p ~/Siamese_VMS_Project"
 
 Write-Host "Copying files to AWS..."
-scp -i $key -o StrictHostKeyChecking=no siamese_model.py dataset.py train_siamese.py ${user}@${ip}:~/Siamese_VMS_Project/
+scp -i $key -o StrictHostKeyChecking=no ../core/siamese_model.py dataset.py train_siamese.py ${user}@${ip}:~/Siamese_VMS_Project/
 
 Write-Host "Starting Background Training on AWS (this will take several hours)..."
 ssh -i $key -o StrictHostKeyChecking=no $user@$ip "cd ~/Siamese_VMS_Project && pip install transformers librosa 'datasets<3.0.0' soundfile && nohup python train_siamese.py > training.log 2>&1 < /dev/null &"

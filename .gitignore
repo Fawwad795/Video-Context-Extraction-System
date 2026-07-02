@@ -46,7 +46,7 @@ VMS/
 # --- Generated KWS artifacts (rebuildable from the pipeline) ---
 Siamese_VMS_Project/keywords/
 Siamese_VMS_Project/logs/detections_*.json
-Siamese_VMS_Project/transcripts.txt
+# audios/transcripts.txt and logs/archive/ are curated write-up evidence - tracked
 
 # --- Disposable experiment artifacts (local only) ---
 Siamese_VMS_Project/audios_prev/

@@ -16,17 +16,25 @@ compensates for accent, speaking style, and room acoustics shifts.
 
 import glob
 import os
+import sys
 
 import librosa
 import numpy as np
 import torch
 
+# core/ holds the shared modules (this file, siamese_model, augment_utils);
+# entry scripts live in pipeline/ and training/, so make core importable
+# regardless of where the interpreter started from.
+CORE_DIR = os.path.dirname(os.path.abspath(__file__))
+if CORE_DIR not in sys.path:
+    sys.path.insert(0, CORE_DIR)
+
 from siamese_model import SiameseAudioModel
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CORE_DIR)
 # Override with the SIAMESE_WEIGHTS env var to A/B different checkpoints
 WEIGHTS_PATH = os.environ.get(
-    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "best_siamese_model.pth"))
+    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "best_siamese_model.pth"))
 # Override with SIAMESE_AUDIO_DIR to score against preprocessed audio
 AUDIO_DIR = os.environ.get("SIAMESE_AUDIO_DIR", os.path.join(PROJECT_ROOT, "audios"))
 SAMPLE_RATE = 16000
@@ -36,7 +44,7 @@ DEFAULT_TOP_K = 50
 def cohort_path(keyword):
     # Per-keyword: cohort windows are sampled at the keyword's duration and
     # distractor words exclude the keyword, so cohorts are not interchangeable.
-    return os.path.join(PROJECT_ROOT, f"cohort_{keyword}.npz")
+    return os.path.join(PROJECT_ROOT, "keywords", f"cohort_{keyword}.npz")
 
 
 def load_siamese_model():

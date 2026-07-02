@@ -5,7 +5,7 @@ $remote = "~/Siamese_VMS_Project"
 
 Write-Host "Copying Phase-2 files to AWS..."
 scp -i $key -o StrictHostKeyChecking=no `
-    augment_utils.py tts_bank.py dataset_v2.py train_siamese_v2.py siamese_model.py `
+    ../core/augment_utils.py tts_bank.py dataset_v2.py train_siamese_v2.py ../core/siamese_model.py `
     ${user}@${ip}:${remote}/
 
 Write-Host "Launching TTS bank generation + GRL training (chained, background)..."

@@ -20,6 +20,10 @@ import os
 import librosa
 import numpy as np
 
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
+
 from scoring import (PROJECT_ROOT, SAMPLE_RATE, cohort_path, embed_batch,
                      load_siamese_model, sample_stream_windows)
 

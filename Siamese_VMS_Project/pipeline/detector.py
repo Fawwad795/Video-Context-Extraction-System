@@ -22,6 +22,10 @@ from datetime import datetime
 import librosa
 import numpy as np
 
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
+
 from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, asnorm_windows,
                      embed_batch, l2_normalize, list_chunk_audios,
                      load_cohort, load_siamese_model)

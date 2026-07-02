@@ -4,6 +4,29 @@ This project is a state-of-the-art **Zero-Shot Audio Context Extraction Pipeline
 
 By treating audio keyword spotting as an **Image Recognition Similarity Problem** (comparing Phonetic Embeddings in abstract tensor space), the system can instantly identify target words regardless of who is speaking them, while perfectly rejecting background noise.
 
+## Project Layout
+
+```
+Siamese_VMS_Project/
+├── core/         shared modules: siamese_model.py (network), scoring.py (embedding,
+│                 AS-norm, cohort utils), augment_utils.py (audio augmentation)
+├── pipeline/     the detection pipeline, in run order: downloader.py → transcriber.py →
+│                 keyword_generator.py → convert_anchor_knnvc.py (optional, recommended) →
+│                 cohort_builder.py → calibrate.py → detector.py → validate_detection.py
+│                 (+ transcribe_chunks.py, denoise_chunks.py utilities)
+├── training/     offline model training (AWS): train_siamese.py (Phase 1),
+│                 train_siamese_v2.py + dataset_v2.py + tts_bank.py (Phase 2 GRL),
+│                 deploy_*.ps1 launch scripts
+├── checkpoints/  trained weights (best_siamese_model.pth = Phase 1 baseline;
+│                 siamese_v2_*.pth = Phase 2 runs; select via SIAMESE_WEIGHTS env var)
+├── keywords/     generated anchors, calibrations, cohorts (per keyword)
+├── audios/ videos/  downloaded live-stream chunks
+├── logs/         detection outputs
+└── Reports/      progress reports
+```
+
+Run pipeline scripts from the project root, e.g. `python pipeline/detector.py --keyword penalty`.
+
 ## Architecture
 
 The system relies on a **Siamese Neural Network** with the following architecture:
@@ -51,7 +74,7 @@ Two production fixes replace the original single-TTS-anchor + hardcoded-L2-thres
 
 The detector scans at **multiple window scales** (default 0.6x/0.8x/1.0x of the TTS anchor duration) because conversational speech is often ~1.5-2x faster than SpeechT5's pace; a fixed TTS-length window dilutes the mean-pooled embedding with surrounding words. Note: the calibrated threshold is fitted on single-scale negatives, so multi-scale scanning raises the effective per-chunk false-alarm rate - use a stricter `--fa-percentile` (e.g. 99.8) if FPs appear.
 
-`validate_detection.py` closes the loop: it transcribes each chunk with whisper-tiny and reports chunk-level precision/recall/F1 of the detector against the transcript ground truth. `transcribe_chunks.py` dumps all chunk transcripts to `transcripts.txt`.
+`validate_detection.py` closes the loop: it transcribes each chunk with whisper-tiny and reports chunk-level precision/recall/F1 of the detector against the transcript ground truth. `transcribe_chunks.py` dumps all chunk transcripts to `audios/transcripts.txt`.
 
 **Known limitation (measured 2026-06-11):** detection quality is speaker/style-dependent with the current frozen model. On scripted news-anchor speech the TTS prototype anchor reached F1 0.57-0.80; on fast conversational debate speech it failed (the raw cosine of a confusable word, e.g. "appropriate" vs "penalty", exceeded that of the true keyword - an embedding-space ranking failure that no threshold can fix). This is the residual synthetic-to-real + anisotropy gap; the Phase-2 retrain (TTS-mixed triplets + gradient-reversal domain classifier) targets exactly this.
 
@@ -61,30 +84,30 @@ To run the pipeline from scratch on a new video:
 
 1. **Download & Chunk:**
    ```bash
-   python downloader.py
+   python pipeline/downloader.py
    ```
 2. **VAD & Transcription (selects the keyword, also used for validation):**
    ```bash
-   python transcriber.py
+   python pipeline/transcriber.py
    ```
 3. **Build the Multi-Voice Prototype Anchor:**
    ```bash
-   python keyword_generator.py
+   python pipeline/keyword_generator.py
    ```
 4. **Build the AS-Norm Impostor Cohort:**
    ```bash
-   python cohort_builder.py
+   python pipeline/cohort_builder.py
    ```
 5. **Calibrate the Per-Keyword Threshold:**
    ```bash
-   python calibrate.py
+   python pipeline/calibrate.py
    ```
 6. **Run Live Zero-Shot Inference:**
    ```bash
-   python detector.py
+   python pipeline/detector.py
    ```
    (`--anchor-audio keywords/human_absolutely_real.m4a` overrides the TTS centroid with a recorded anchor.)
 7. **Validate Against Whisper Ground Truth:**
    ```bash
-   python validate_detection.py
+   python pipeline/validate_detection.py
    ```

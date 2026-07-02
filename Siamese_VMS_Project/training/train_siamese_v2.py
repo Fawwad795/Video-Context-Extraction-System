@@ -34,6 +34,10 @@ import torch.optim as optim
 from scipy.stats import rankdata
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
+
 from dataset_v2 import CLIP_SAMPLES, SR, SpeechTripletDomainDataset, make_dataloader
 from siamese_model import SiameseAudioModel
 

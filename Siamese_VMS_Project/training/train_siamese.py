@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
+
 from siamese_model import SiameseAudioModel
 from dataset import get_dataloader
 import os

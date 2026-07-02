@@ -92,7 +92,7 @@ def transcribe_and_find_keyword(audio_dir):
     print(f"\nSelected keyword for detection: '{top_word}'")
     
     # Save the keyword to a file so other scripts can use it
-    with open("selected_keyword.txt", "w") as f:
+    with open(os.path.join(base_path, "selected_keyword.txt"), "w") as f:
         f.write(top_word)
         
     return top_word

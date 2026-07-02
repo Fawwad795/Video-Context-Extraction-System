@@ -1,0 +1,111 @@
+{
+  "keyword": "heat",
+  "threshold": 2.2439571964740748,
+  "anchor": "TTS prototype centroid",
+  "window_seconds": 0.352,
+  "chunks": [
+    {
+      "file": "live_0.wav",
+      "n_windows": 94,
+      "best_score": 2.2991931438446045,
+      "best_raw_cos": 0.9218378663063049,
+      "best_time": 1.05,
+      "detections": [
+        {
+          "time": 1.05,
+          "score": 2.2991931438446045,
+          "raw_cos": 0.9218378663063049
+        },
+        {
+          "time": 2.0,
+          "score": 2.266782283782959,
+          "raw_cos": 0.9327061772346497
+        }
+      ]
+    },
+    {
+      "file": "live_1.wav",
+      "n_windows": 94,
+      "best_score": 2.4123129844665527,
+      "best_raw_cos": 0.9162536859512329,
+      "best_time": 4.05,
+      "detections": [
+        {
+          "time": 4.05,
+          "score": 2.4123129844665527,
+          "raw_cos": 0.9162536859512329
+        }
+      ]
+    },
+    {
+      "file": "live_2.wav",
+      "n_windows": 93,
+      "best_score": 2.086601734161377,
+      "best_raw_cos": 0.9315751194953918,
+      "best_time": 4.0,
+      "detections": []
+    },
+    {
+      "file": "live_3.wav",
+      "n_windows": 94,
+      "best_score": 1.3365989923477173,
+      "best_raw_cos": 0.8732893466949463,
+      "best_time": 1.75,
+      "detections": []
+    },
+    {
+      "file": "live_4.wav",
+      "n_windows": 94,
+      "best_score": 0.887464702129364,
+      "best_raw_cos": 0.8539062738418579,
+      "best_time": 2.7,
+      "detections": []
+    },
+    {
+      "file": "live_5.wav",
+      "n_windows": 93,
+      "best_score": 1.3868294954299927,
+      "best_raw_cos": 0.8837003707885742,
+      "best_time": 1.35,
+      "detections": []
+    },
+    {
+      "file": "live_6.wav",
+      "n_windows": 94,
+      "best_score": 1.3365989923477173,
+      "best_raw_cos": 0.8732893466949463,
+      "best_time": 1.75,
+      "detections": []
+    },
+    {
+      "file": "live_7.wav",
+      "n_windows": 94,
+      "best_score": 0.887464702129364,
+      "best_raw_cos": 0.8539062738418579,
+      "best_time": 2.7,
+      "detections": []
+    },
+    {
+      "file": "live_8.wav",
+      "n_windows": 93,
+      "best_score": 1.3868294954299927,
+      "best_raw_cos": 0.8837003707885742,
+      "best_time": 1.35,
+      "detections": []
+    },
+    {
+      "file": "live_9.wav",
+      "n_windows": 94,
+      "best_score": 2.3649816513061523,
+      "best_raw_cos": 0.9479934573173523,
+      "best_time": 3.45,
+      "detections": [
+        {
+          "time": 3.45,
+          "score": 2.3649816513061523,
+          "raw_cos": 0.9479934573173523
+        }
+      ]
+    }
+  ]
+}

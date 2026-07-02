@@ -1,12 +1,16 @@
 """Transcribe every live chunk with whisper-tiny into a text document.
 
-Output: transcripts.txt (one block per chunk, in chunk order).
+Output: audios/transcripts.txt (one block per chunk, in chunk order).
 """
 
 import argparse
 import os
 import warnings
 from datetime import datetime
+
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 from scoring import PROJECT_ROOT, list_chunk_audios
 
@@ -15,7 +19,7 @@ warnings.filterwarnings("ignore")
 
 def main():
     ap = argparse.ArgumentParser(description="Write chunk transcripts to a text file.")
-    ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "transcripts.txt"))
+    ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "audios", "transcripts.txt"))
     args = ap.parse_args()
 
     audio_files = list_chunk_audios()

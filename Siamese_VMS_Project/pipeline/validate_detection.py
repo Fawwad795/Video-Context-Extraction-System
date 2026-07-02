@@ -14,6 +14,10 @@ import os
 import re
 import warnings
 
+# Shared modules (scoring, siamese_model, augment_utils) live in ../core
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
+
 from scoring import PROJECT_ROOT, list_chunk_audios
 
 warnings.filterwarnings("ignore")
