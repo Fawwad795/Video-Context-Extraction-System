@@ -1,6 +1,6 @@
 """Siamese KWS live monitoring platform - GUI.
 
-Modeled on the original VMS GUI (Original VMS Project/vms.py): enter a
+Modeled on the original VMS GUI (Correlation_VMS_Project/vms.py): enter a
 keyword and a live-stream URL, press Start. A worker subprocess
 (live_worker.py) builds the keyword artifacts, then monitors the stream:
 chunks containing a keyword detection are saved to

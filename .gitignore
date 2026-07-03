@@ -58,9 +58,6 @@ Siamese_VMS_Project/videos_prev/
 Siamese_VMS_Project/audios_denoised/
 Siamese_VMS_Project/pretrained_models/
 
-# --- ASR project runtime scratch ---
-ASR_VMS_Project/work/
-
 # --- PhonMatchNet (G2P / query-by-text) approach ---
 PhonMatchNet_VMS_Project/vms_out/
 PhonMatchNet_VMS_Project/*.npz
