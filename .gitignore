@@ -2,6 +2,7 @@
 .claude/
 .vscode/
 .idea/
+HANDOFF.md
 
 # --- Extension ideation (kept local, per project decision) ---
 Extension/
