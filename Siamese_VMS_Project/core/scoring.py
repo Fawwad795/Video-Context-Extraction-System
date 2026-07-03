@@ -31,7 +31,10 @@ if CORE_DIR not in sys.path:
 
 from siamese_model import SiameseAudioModel
 
-PROJECT_ROOT = os.path.dirname(CORE_DIR)
+# Override with SIAMESE_PROJECT_ROOT to redirect all pipeline inputs/outputs
+# (keywords/, audios/, logs/) into a different data root - used by platform/
+# so its runtime artifacts never land in the research folders.
+PROJECT_ROOT = os.environ.get("SIAMESE_PROJECT_ROOT", os.path.dirname(CORE_DIR))
 # Override with the SIAMESE_WEIGHTS env var to A/B different checkpoints
 WEIGHTS_PATH = os.environ.get(
     "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "best_siamese_model.pth"))
