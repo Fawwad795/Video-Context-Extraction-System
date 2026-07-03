@@ -52,6 +52,12 @@ DEFAULT_TOP_K = 50
 BACKEND = os.environ.get("SIAMESE_BACKEND", "baseline").strip().lower()
 BACKBONE = os.environ.get("SIAMESE_BACKBONE", "microsoft/wavlm-base-plus")
 BACKBONE_LAYER = int(os.environ.get("SIAMESE_LAYER", "10"))
+# SIAMESE_BACKEND=wavlm-trained (Step 3): same frozen backbone/layer, but
+# windows are pooled by a trained attentive head (training/train_siamese_v3.py)
+# instead of the frame mean. Checkpoint override: SIAMESE_V3_WEIGHTS.
+V3_WEIGHTS_PATH = os.environ.get(
+    "SIAMESE_V3_WEIGHTS",
+    os.path.join(PROJECT_ROOT, "checkpoints", "siamese_v3_best.pth"))
 
 
 def artifact_suffix():
@@ -63,7 +69,10 @@ def artifact_suffix():
     if BACKEND == "baseline":
         return ""
     short = BACKBONE.split("/")[-1].replace("-base-plus", "").replace("-", "")
-    return f"_{short}{BACKBONE_LAYER}"
+    suffix = f"_{short}{BACKBONE_LAYER}"
+    if BACKEND == "wavlm-trained":
+        suffix += "ft"
+    return suffix
 
 
 def anchor_path(keyword):
@@ -87,6 +96,12 @@ def load_siamese_model():
     if BACKEND == "wavlm":
         from embedders import WavLMEmbedder
         return WavLMEmbedder(BACKBONE, BACKBONE_LAYER)
+    if BACKEND == "wavlm-trained":
+        from embedders import TrainedWavLMEmbedder
+        weights = V3_WEIGHTS_PATH if os.path.exists(V3_WEIGHTS_PATH) else None
+        if weights is None:
+            print(f"WARNING: {V3_WEIGHTS_PATH} not found - identity-init head.")
+        return TrainedWavLMEmbedder(weights, BACKBONE, BACKBONE_LAYER)
     if BACKEND != "baseline":
         raise ValueError(f"Unknown SIAMESE_BACKEND: {BACKEND!r}")
     model = SiameseAudioModel()
@@ -126,6 +141,54 @@ def embed_batch(model, audios, batch_size=16):
                 for j, i in enumerate(chunk):
                     out[i] = emb[j]
     return l2_normalize(np.stack(out))
+
+
+def sample_stream_window_embeddings(model, window_samples, n_windows, rng,
+                                    files=None, hop_seconds=0.05,
+                                    scales=(0.6, 0.8, 1.0)):
+    """Embed random stream windows THE WAY THE DETECTOR WILL SCORE THEM.
+
+    Frame backends pool sliding windows out of a chunk-level forward pass;
+    embedding an isolated window (separate forward, no surrounding context)
+    lands in a measurably different region of the space. Calibration
+    negatives must come from the deployment scoring path - same chunk-
+    context pooling, same multi-scale window lengths - or the fitted
+    threshold describes a distribution the detector never sees (observed:
+    scotland clean-negative max -0.18 isolated vs +0.62 chunk-pooled).
+
+    Returns L2-normalized [n_windows, D] sampled uniformly over the union
+    of all scales' windows.
+    """
+    if files is None:
+        files = list_chunk_audios()
+    if not getattr(model, "is_frame_backend", False):
+        return embed_batch(model, sample_stream_windows(
+            window_samples, n_windows, rng, files=files))
+
+    from embedders import pooled_windows, samples_to_frames, FRAME_STRIDE
+    hop = max(1, int(round(hop_seconds * SAMPLE_RATE / FRAME_STRIDE)))
+    pools = []
+    for f in files:
+        y, _ = librosa.load(f, sr=SAMPLE_RATE)
+        frames = None
+        for scale in scales:
+            ws = max(int(window_samples * scale), int(0.15 * SAMPLE_RATE))
+            if len(y) <= ws:
+                continue
+            if frames is None:
+                frames = model.frames(y.astype(np.float32))
+            wf = samples_to_frames(ws)
+            if hasattr(model, "pool_windows"):
+                embs, _ = model.pool_windows(frames, wf, hop)
+            else:
+                embs, _ = pooled_windows(frames, wf, hop)
+            if len(embs):
+                pools.append(embs)
+    if not pools:
+        raise ValueError("All chunks are shorter than the keyword window.")
+    allw = np.concatenate(pools)
+    idx = rng.choice(len(allw), size=min(n_windows, len(allw)), replace=False)
+    return l2_normalize(allw[idx])
 
 
 def topk_stats(scores, top_k):
@@ -234,13 +297,46 @@ def list_chunk_audios(audio_dir=AUDIO_DIR):
     return files
 
 
-def sample_stream_windows(window_samples, n_windows, rng, audio_dir=AUDIO_DIR):
+def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
+    """Live chunks whose transcript does not contain the keyword.
+
+    The same leakage guard as convert_anchor_knnvc.py, shared here because
+    calibration needs it too: negative windows sampled from keyword-bearing
+    chunks can include the actual keyword utterance, and a discriminative
+    embedding then puts the false-alarm percentile ABOVE the true-keyword
+    score (observed with the v3 trained head: scotland threshold 1.98 vs
+    true windows 1.85, the top 2 of 400 "negatives" being the keyword).
+    """
+    import re
+    transcript_path = os.path.join(PROJECT_ROOT, "audios", "transcripts.txt")
+    contains_kw = {}
+    if os.path.exists(transcript_path):
+        current = None
+        for line in open(transcript_path, encoding="utf-8"):
+            m = re.match(r"\[(live_\d+\.wav)\]", line.strip())
+            if m:
+                current = m.group(1)
+                contains_kw.setdefault(current, False)
+            elif current:
+                tokens = set(re.findall(r"[a-z']+", line.lower()))
+                if keyword.lower() in tokens:
+                    contains_kw[current] = True
+    files = [f for f in list_chunk_audios(audio_dir)
+             if not contains_kw.get(os.path.basename(f), False)]
+    return files or list_chunk_audios(audio_dir)
+
+
+def sample_stream_windows(window_samples, n_windows, rng, audio_dir=AUDIO_DIR,
+                          files=None):
     """Random keyword-length windows from the live chunks.
 
     These are (with overwhelming probability) non-keyword audio in exactly
     the deployment domain, which is what an impostor cohort should be.
+    Pass files=keyword_free_chunks(kw) to guard against sampling actual
+    keyword utterances (essential once the embedding is discriminative).
     """
-    files = list_chunk_audios(audio_dir)
+    if files is None:
+        files = list_chunk_audios(audio_dir)
     if not files:
         raise FileNotFoundError(
             f"No .wav chunks in {audio_dir} - run downloader.py first.")

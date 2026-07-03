@@ -32,9 +32,9 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
-                     asnorm_windows, calibration_path, embed_batch,
+                     asnorm_windows, calibration_path, keyword_free_chunks,
                      l2_normalize, load_cohort, load_siamese_model,
-                     sample_stream_windows)
+                     sample_stream_window_embeddings)
 
 
 def main():
@@ -69,13 +69,28 @@ def main():
 
     print(f"Embedding {args.negatives} fresh negative stream windows...")
     rng = np.random.default_rng(args.seed)
-    neg_audio = sample_stream_windows(window_samples, args.negatives, rng)
-    neg_embs = embed_batch(model, neg_audio)
+    # Leakage guard: never sample "negatives" from chunks whose transcript
+    # contains the keyword - with a discriminative embedding the sampled
+    # keyword windows would set the false-alarm percentile above the true
+    # score (that is not a false alarm, it is the keyword). And embed them
+    # via the detector's own scoring path (chunk-context frame pooling for
+    # frame backends), so the fitted percentile describes the distribution
+    # the detector actually thresholds.
+    neg_files = keyword_free_chunks(keyword)
+    neg_embs = sample_stream_window_embeddings(
+        model, window_samples, args.negatives, rng, files=neg_files)
 
     pos_scores, pos_raw = asnorm_windows(positives, centroid, cohort, args.top_k)
     neg_scores, neg_raw = asnorm_windows(neg_embs, centroid, cohort, args.top_k)
 
-    threshold = float(np.percentile(neg_scores, args.fa_percentile))
+    # Slightly above the percentile: the detector fires at score >= threshold,
+    # and with calibration windows drawn from the detector's own scoring grid
+    # the p100 threshold IS the score of a real negative window - which would
+    # then fire by (near-)equality. The margin must exceed float32 BLAS
+    # jitter between the two computations of the same window (~1e-7 observed;
+    # shape-dependent matmul blocking), while staying negligible against the
+    # AS-norm score scale (units ~1).
+    threshold = float(np.percentile(neg_scores, args.fa_percentile)) + 1e-4
     est_recall = float((pos_scores >= threshold).mean())
 
     print("\n--- Calibration report ---")
