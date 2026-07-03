@@ -17,7 +17,7 @@ scenario (TTS prototype anchor vs live human speech), measured zero-shot
 on words never seen in training triplets.
 
 Checkpoints: siamese_v2_best.pth (best AUC), siamese_v2_epoch_<n>.pth,
-siamese_v2_final.pth. The v1 checkpoint best_siamese_model.pth is used as
+siamese_v2_final.pth. The v1 checkpoint siamese_v1_best.pth is used as
 warm start and never overwritten.
 """
 
@@ -215,7 +215,7 @@ def train(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Phase-2 GRL domain-adversarial training.")
     ap.add_argument("--manifest", default=os.path.expanduser("~/tts_bank/manifest.json"))
-    ap.add_argument("--init", default="best_siamese_model.pth",
+    ap.add_argument("--init", default="siamese_v1_best.pth",
                     help="v1 checkpoint to warm-start from ('' = from scratch)")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch-size", type=int, default=32)

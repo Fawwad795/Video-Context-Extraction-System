@@ -4,7 +4,7 @@ What changed vs. Phase 2 (train_siamese_v2.py):
 
   backbone   wav2vec2-base LAST layer -> frozen WavLM-base-plus mid layer
              (L10), where word identity actually lives (validated by
-             pipeline/eval_scoring_ab.py: AP 0.586 -> 1.00 on Set D);
+             Set D ranking AP 0.586 -> 1.00 on WavLM L10);
   pooling    frame mean -> trained multi-head attentive pooling
              (core/embedders.AttentivePoolingHead, identity-init so
              epoch 0 == the already-validated mean-pool operating point);
@@ -28,8 +28,8 @@ clips of other eval words (negatives). Zero-shot, same protocol as v2, so
 numbers are comparable. Also reported: pos/neg cosine means, i.e. the
 absolute-score lift Step 3 is about.
 
-Checkpoints: siamese_v3_best.pth (best AUC), siamese_v3_final.pth -
-consumed by SIAMESE_BACKEND=wavlm-trained (core/scoring.py).
+Checkpoints: siamese_v3_best.pth (best AUC) — consumed by
+SIAMESE_BACKEND=wavlm-trained (core/scoring.py).
 """
 
 import argparse
@@ -179,8 +179,6 @@ def train(args):
                                  {**extra, "epoch": epoch, "auc": auc})
             print(f"New best AUC {auc:.4f} -> siamese_v3_best.pth")
 
-    save_head_checkpoint(head, "siamese_v3_final.pth",
-                         {**extra, "epoch": args.epochs, "auc": auc})
     print(f"Done. Best AUC {best_auc:.4f} at epoch {best_epoch} "
           f"(epoch-0 mean-pool baseline {auc0:.4f}).")
 

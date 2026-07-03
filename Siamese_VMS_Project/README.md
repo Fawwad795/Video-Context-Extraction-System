@@ -13,8 +13,8 @@ You type a keyword like `"washington"`. The system:
    from this specific stream (same speaker/mic/room tone).
 3. **Scans** the live audio in small time-slices, comparing each slice's
    "sound fingerprint" to the keyword's fingerprint.
-4. **Double-checks** every promising slice by asking "does this actually
-   contain the keyword's spoken sounds?", not just "does it sound similar?"
+4. **Flags** slices whose fingerprint score crosses a calibrated threshold
+   (Adaptive S-norm against an impostor cohort).
 
 The result: it can catch a keyword nobody ever recorded, spoken by a
 newsreader nobody trained the system on, inside a live stream it has never
@@ -34,7 +34,7 @@ failure mode in this project (see [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT
 for the measured failures: F1 = 0.00 on conversational speech with a raw
 TTS anchor).
 
-## How It Works: The Three-Stage Pipeline
+## How It Works: The Two-Stage Pipeline
 
 ```mermaid
 flowchart TD
@@ -58,33 +58,22 @@ flowchart TD
         SLIDE --> EMBED --> ASNORM
     end
 
-    subgraph S3["STAGE 3 &nbsp; Verification"]
-        direction TB
-        CTC["CTC phoneme decode<br/>wav2vec2-espeak"]
-        MATCH["Match against the<br/>keyword's phoneme sequence"]
-        CTC --> MATCH
-    end
-
     KW --> TTS
     STREAM -. reference audio .-> KNNVC
     KNNVC --> EMBED
     STREAM --> SLIDE
-    ASNORM -- "candidate windows" --> CTC
-    MATCH --> RESULT
+    ASNORM --> RESULT
 
     classDef io fill:#f3e8ff,stroke:#9333ea,stroke-width:2px,color:#581c87,font-weight:bold
     classDef stage1 fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
     classDef stage2 fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
-    classDef stage3 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
 
     class KW,STREAM,RESULT io
     class TTS,CENTROID,KNNVC stage1
     class SLIDE,EMBED,ASNORM stage2
-    class CTC,MATCH stage3
 
     style S1 fill:#f0f9ff,stroke:#0284c7,stroke-width:2px
     style S2 fill:#fffbeb,stroke:#d97706,stroke-width:2px
-    style S3 fill:#f0fdf4,stroke:#16a34a,stroke-width:2px
 ```
 
 ### Stage 1: Anchor Building (Bridging the Domain Gap)
@@ -131,49 +120,33 @@ where $(\mu_a, \sigma_a)$ and $(\mu_w, \sigma_w)$ are the mean and standard
 deviation of the top-$k$ closest-impostor scores from a per-keyword cohort
 (`pipeline/cohort_builder.py`), computed on the anchor side and the window
 side respectively. The accept threshold is fitted per keyword by
-`pipeline/calibrate.py` as an empirical false-alarm percentile on that
-cohort, not a hand-picked distance. The detector also keeps its top-8
-non-maximum-suppressed windows per chunk as "candidates" regardless of
-threshold, so Stage 3 can rescue a true detection that scored just under
-the line.
-
-### Stage 3: Verification (Phoneme Precision Filter)
-
-**Intuition:** the detector's "sounds similar" test can be fooled by
-unrelated phrases that happen to have a similar overall shape (for example,
-two different sentences that are both fast and low-pitched). So every
-candidate gets a second, completely different check: what speech sounds
-does it actually contain, and do they match the keyword's?
-
-**Technical:** `pipeline/verify_detections.py` CTC-decodes each candidate
-window with `facebook/wav2vec2-lv-60-espeak-cv-ft` into an IPA phoneme
-sequence, and compares it (infix edit distance, free ends) against
-references decoded from the anchor clips. This model is trained to predict
-phonemes, not speaker or recording identity, so its output is invariant to
-the exact domain gap that Stage 1 works around: TTS and kNN-VC-converted
-clips of the same word decode to identical phoneme strings. The accept
-threshold is the midpoint between the negative (random stream window)
-phone-similarity percentile and the references' own leave-one-out
-self-similarity, floored at 0.5.
+`pipeline/calibrate.py` as an empirical false-alarm bound on keyword-free
+stream windows (aligned with the detector's sliding-window protocol), not a
+hand-picked distance. With the trained attentive head backend
+(`SIAMESE_BACKEND=wavlm-trained`), true keyword windows on Set D cross this
+threshold directly with large margins; see
+[Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
 
 ## Does It Actually Work? (Validation Results)
 
-The clearest evidence is the most recent validation run, on a chunk set
-(Sky News weather bulletin) the pipeline had never been tuned against, with
-four keywords deliberately chosen to span difficulty, not cherry-picked:
+The clearest evidence is the most recent validation run on Set D (Sky News
+weather bulletin), with five keywords deliberately chosen to span
+difficulty, using the trained attentive-head detector
+(`SIAMESE_BACKEND=wavlm-trained`, aligned p100 calibration):
 
 | Keyword | Difficulty | Precision | Recall | F1 |
 |---|---|---|---|---|
 | russia | rare (1 true chunk), distinct | 1.00 | 1.00 | 1.00 |
 | weather | rare (1 true chunk), distinct | 1.00 | 1.00 | 1.00 |
-| scotland | frequent (3 true chunks) | 0.75 | 1.00 | 0.86 |
-| ireland | frequent (3), near-homophone ("Island") stress test | 1.00 | 0.67 | 0.80 |
-| **Aggregate (40 chunk decisions)** | | **0.875** | **0.875** | **0.875** |
+| scotland | frequent (3 true chunks) | 1.00 | 1.00 | 1.00 |
+| ireland | frequent (3), near-homophone ("Island") stress test | 1.00 | 1.00 | 1.00 |
+| brighten | rare (1 true chunk) | 1.00 | 1.00 | 1.00 |
+| **Aggregate (50 chunk decisions)** | | **1.00** | **1.00** | **1.00** |
 
-Both remaining errors trace to a single borderline chunk, not a systemic
-failure. Full breakdown, per-chunk detail, and every historical experiment
-(including the F1 = 0.00 domain-gap failures that motivated Stages 1 and 3)
-are in [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
+Full breakdown, per-chunk detail, and every historical experiment
+(including the F1 = 0.00 domain-gap failures that motivated Stage 1 and
+the trained detector head) are in
+[Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
 
 ## Project Layout
 
@@ -182,15 +155,16 @@ Siamese_VMS_Project/
 ├── core/         shared modules: siamese_model.py (network), scoring.py (embedding,
 │                 AS-norm, cohort utils), augment_utils.py (audio augmentation)
 ├── pipeline/     the detection pipeline, in run order: downloader.py -> transcribe_chunks.py
-│                 (or transcriber.py) -> keyword_generator.py -> convert_anchor_knnvc.py
-│                 (recommended) -> cohort_builder.py -> calibrate.py -> detector.py ->
-│                 verify_detections.py (phoneme precision filter) -> validate_detection.py
-│                 (+ denoise_chunks.py utility)
-├── training/     offline model training (AWS): train_siamese.py (Phase 1),
+│                 -> keyword_generator.py -> convert_anchor_knnvc.py (recommended)
+│                 -> cohort_builder.py -> calibrate.py -> detector.py ->
+│                 validate_detection.py
+├── training/     offline model training (AWS): train_siamese_v1.py (Phase 1),
 │                 train_siamese_v2.py + dataset_v2.py + tts_bank.py (Phase 2 GRL),
-│                 deploy_*.ps1 launch scripts
-├── checkpoints/  trained weights (best_siamese_model.pth = Phase 1 baseline;
-│                 siamese_v2_*.pth = Phase 2 runs; select via SIAMESE_WEIGHTS env var)
+│                 train_siamese_v3.py + dataset_v3.py (Step 3 attentive head),
+│                 deploy_phase*.ps1 launch scripts
+├── checkpoints/  trained weights (siamese_v1_best.pth = Phase 1 baseline;
+│                 siamese_v2_best.pth = Phase 2; siamese_v3_best.pth = Step 3 head;
+│                 select via SIAMESE_WEIGHTS / SIAMESE_BACKEND env vars)
 ├── keywords/     generated anchors, calibrations, cohorts (per keyword)
 ├── audios/ videos/  downloaded live-stream chunks + transcripts.txt (ground truth)
 ├── logs/         detection outputs (logs/archive/ = retired chunk-set runs)
@@ -260,11 +234,7 @@ Run from the project root. Most scripts default `--keyword` to
    ```bash
    python pipeline/detector.py --keyword washington
    ```
-8. **Verify candidates with the phoneme filter** (precision stage):
-   ```bash
-   python pipeline/verify_detections.py --keyword washington
-   ```
-9. **Validate against Whisper ground truth** (prints precision/recall/F1):
+8. **Validate against Whisper ground truth** (prints precision/recall/F1):
    ```bash
    python pipeline/validate_detection.py --keyword washington
    ```

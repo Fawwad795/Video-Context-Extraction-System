@@ -20,13 +20,12 @@ Architecture: downloading and detection are decoupled.
         convert_anchor_knnvc.py  anchor converted into the stream voice
         cohort_builder.py        AS-norm impostor cohort
         calibrate.py             per-keyword detection threshold
-      plus phoneme references + tau, cached to <kw>_phone_cache.json.
       Then the endless live loop: take the next chunk off the queue, scan it
-      with the AS-norm detector (50 ms hop - load-bearing for the verifier
-      rescue path), phoneme-verify the candidates, then:
-        detection verified -> chunk audio+video moved to
+      with the AS-norm detector (50 ms hop - must match the calibration
+      window grid), then:
+        detection          -> chunk audio+video moved to
                               detections/<keyword>/ with a JSON record
-        nothing verified   -> chunk audio+video deleted
+        no detection       -> chunk audio+video deleted
 
 Disk/memory stay flat no matter how long the run is: processed chunks are
 deleted (or moved to detections/), and the unprocessed backlog is capped -
@@ -37,7 +36,7 @@ files setup is reading stay stable).
 Status protocol on stdout (parsed by the GUI):
   @@PHASE <setup|live|error>
   @@STATUS <one-line status>
-  @@DETECT <total verified detections this run>
+  @@DETECT <total detections this run>
   @@QUEUE <unprocessed chunks waiting>
 """
 
@@ -59,14 +58,12 @@ SIAMESE_ROOT = os.path.dirname(PLATFORM_DIR)
 PIPELINE_DIR = os.path.join(SIAMESE_ROOT, "pipeline")
 CORE_DIR = os.path.join(SIAMESE_ROOT, "core")
 DEFAULT_DATA_ROOT = os.path.join(PLATFORM_DIR, "data")
-DEFAULT_WEIGHTS = os.path.join(SIAMESE_ROOT, "checkpoints", "best_siamese_model.pth")
+DEFAULT_WEIGHTS = os.path.join(SIAMESE_ROOT, "checkpoints", "siamese_v3_best.pth")
 
-# 50 ms hop is required by the verifier rescue path - do not raise it.
+# 50 ms hop - must match the calibration window grid (calibrate.py samples
+# negatives on the same hop, so the fitted threshold assumes it).
 STEP_SECONDS = 0.05
 SCALES = (0.6, 0.8, 1.0)
-TOP_CANDIDATES = 8
-NMS_WINDOW_S = 0.25
-CONTEXT_PAD_S = 0.08
 BATCH_SIZE = 16
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -298,96 +295,12 @@ def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
     detections = [{"time": float(times[i]), "score": float(normed[i]),
                    "raw_cos": float(raw[i]), "scale": float(win_scales[i])}
                   for i in hit_idx]
-
-    # Greedy NMS top-N regardless of threshold: stage-2 rescue candidates.
-    candidates = []
-    for i in np.argsort(-normed):
-        t = float(times[i])
-        if any(abs(t - c["time"]) < NMS_WINDOW_S for c in candidates):
-            continue
-        candidates.append({"time": t, "score": float(normed[i]),
-                           "raw_cos": float(raw[i]),
-                           "scale": float(win_scales[i])})
-        if len(candidates) >= TOP_CANDIDATES:
-            break
+    detections.sort(key=lambda d: -d["score"])
 
     best = int(np.argmax(normed))
-    return {"detections": detections, "candidates": candidates,
+    return {"detections": detections,
             "best_score": float(normed[best]), "best_time": float(times[best]),
             "best_scale": float(win_scales[best])}
-
-
-def verify_chunk(y, scan, refs, tau, phon_ctx, window_seconds, sample_rate):
-    """Phoneme-verify detections + rescue candidates (verify_detections.py logic)."""
-    from verify_detections import best_similarity, decode_phones
-    processor, model, torch = phon_ctx
-
-    dets = list(scan["detections"])
-    n_dets = len(dets)
-    for c in scan["candidates"]:
-        if not any(abs(c["time"] - d["time"]) < 1e-6
-                   and c.get("scale") == d.get("scale") for d in dets):
-            dets.append(dict(c))
-
-    verified, best_sim = [], 0.0
-    for k, det in enumerate(dets):
-        ws = window_seconds * det.get("scale", 1.0)
-        s = max(0, int((det["time"] - CONTEXT_PAD_S) * sample_rate))
-        e = min(len(y), int((det["time"] + ws + CONTEXT_PAD_S) * sample_rate))
-        phones = decode_phones(processor, model, torch, y[s:e].astype("float32"))
-        sim = best_similarity(refs, phones)
-        det["phone_sim"] = round(sim, 3)
-        det["rescued"] = k >= n_dets
-        best_sim = max(best_sim, sim)
-        if sim >= tau:
-            verified.append(det)
-    verified.sort(key=lambda d: -d["score"])
-    return verified, best_sim
-
-
-def build_phone_cache(keyword, data_root, window_seconds, phon_ctx,
-                      negatives=40, fa_percentile=99.0, min_tau=0.5, seed=777):
-    """Phoneme references + calibrated tau, cached under keywords/."""
-    import numpy as np
-    from scoring import SAMPLE_RATE, sample_stream_windows
-    from verify_detections import (PHONEME_MODEL, best_similarity,
-                                   build_references, decode_phones)
-
-    cache_path = os.path.join(data_root, "keywords", f"{keyword}_phone_cache.json")
-    if os.path.exists(cache_path):
-        with open(cache_path, encoding="utf-8") as f:
-            cache = json.load(f)
-        if cache.get("model") == PHONEME_MODEL and cache.get("refs"):
-            status(f"Phoneme refs + tau loaded from cache (tau={cache['tau']:.3f})")
-            return cache["refs"], float(cache["tau"])
-
-    processor, model, torch = phon_ctx
-    status("Building phoneme references from anchor clips ...")
-    refs = build_references(keyword, processor, model, torch, max_refs=8)
-    if not refs:
-        raise RuntimeError("No usable phoneme reference decodes for the keyword.")
-
-    if len(refs) > 1:
-        loo = [best_similarity(refs[:i] + refs[i + 1:], r) for i, r in enumerate(refs)]
-        loo_mean = float(np.mean(loo))
-    else:
-        loo_mean = 1.0
-
-    status(f"Calibrating phoneme tau on {negatives} stream windows ...")
-    rng = np.random.default_rng(seed)
-    win = int(window_seconds * SAMPLE_RATE)
-    neg = [best_similarity(refs, decode_phones(processor, model, torch, w))
-           for w in sample_stream_windows(win, negatives, rng)]
-    neg_p = float(np.percentile(np.array(neg), fa_percentile))
-    tau = max(0.5 * (neg_p + loo_mean), min_tau)
-
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump({"model": PHONEME_MODEL, "tau": tau, "refs": refs,
-                   "neg_percentile": neg_p, "ref_self_sim": loo_mean,
-                   "created_at": datetime.now().isoformat(timespec="seconds")},
-                  f, indent=2)
-    status(f"Phoneme tau calibrated: {tau:.3f} (cached)")
-    return refs, tau
 
 
 # --------------------------------------------------------------------------
@@ -413,6 +326,7 @@ def main():
     # All pipeline scripts + core modules resolve their paths through this.
     os.environ["SIAMESE_PROJECT_ROOT"] = data_root
     os.environ["SIAMESE_WEIGHTS"] = args.weights
+    os.environ.setdefault("SIAMESE_BACKEND", "wavlm-trained")
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
     audio_dir = os.path.join(data_root, "audios")
@@ -432,10 +346,8 @@ def main():
     tts_backup = os.path.join(kw_dir, f"{keyword}_anchor_tts.npz")
     cohort_file = os.path.join(kw_dir, f"cohort_{keyword}.npz")
     calib_file = os.path.join(kw_dir, f"{keyword}_calibration.json")
-    phone_cache = os.path.join(kw_dir, f"{keyword}_phone_cache.json")
     needs_setup = not all(os.path.exists(p) for p in
-                          (anchor_path, tts_backup, cohort_file, calib_file,
-                           phone_cache))
+                          (anchor_path, tts_backup, cohort_file, calib_file))
 
     # Chunks left on disk by a previous run (killed mid-processing): they are
     # scanned before the live queue, and count toward the bootstrap set.
@@ -502,34 +414,26 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
-    status("Loading phoneme verifier ...")
-    from verify_detections import load_phoneme_model
-    phon_ctx = load_phoneme_model()
-    refs, tau = build_phone_cache(keyword, data_root, window_seconds, phon_ctx)
-
     # -- 6. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
     emit("PHASE", "live")
     live_log = os.path.join(log_dir, f"live_{keyword}.txt")
-    total_verified = 0
+    total_detected = 0
     emit("DETECT", "0")
 
     def process_chunk(video_path, audio_path):
-        nonlocal total_verified
+        nonlocal total_detected
         name = os.path.basename(audio_path)
         if not os.path.exists(audio_path):
             return
         y, _ = librosa.load(audio_path, sr=SAMPLE_RATE)
         scan = scan_chunk(y, model, anchor, cohort, window_samples,
                           threshold, SAMPLE_RATE, DEFAULT_TOP_K)
-        verified, best_sim = ([], 0.0)
-        if scan is not None:
-            verified, best_sim = verify_chunk(y, scan, refs, tau, phon_ctx,
-                                              window_seconds, SAMPLE_RATE)
         del y
+        detections = scan["detections"] if scan is not None else []
 
-        if verified:
-            total_verified += len(verified)
+        if detections:
+            total_detected += len(detections)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base = f"{stamp}_{name[:-4]}"
             kept_video = os.path.join(det_dir, base + ".mp4")
@@ -540,21 +444,21 @@ def main():
             with open(os.path.join(det_dir, base + ".json"), "w") as f:
                 json.dump({"keyword": keyword, "chunk": name,
                            "detected_at": datetime.now().isoformat(timespec="seconds"),
-                           "threshold": threshold, "tau": tau,
+                           "threshold": threshold,
                            "best_score": scan["best_score"],
-                           "detections": verified}, f, indent=2)
-            top = verified[0]
+                           "detections": detections}, f, indent=2)
+            top = detections[0]
             msg = (f"MATCH '{keyword}' in {name} at {top['time']:.1f}s "
-                   f"(AS-norm {top['score']:.2f}, phone-sim {top['phone_sim']:.2f}"
-                   f"{', rescued' if top['rescued'] else ''}) -> saved {base}.mp4")
+                   f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}) "
+                   f"-> saved {base}.mp4")
             with open(live_log, "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
             status(msg)
-            emit("DETECT", str(total_verified))
+            emit("DETECT", str(total_detected))
         else:
             detail = "too short" if scan is None else (
-                f"best AS-norm {scan['best_score']:.2f}, best phone-sim {best_sim:.2f}")
-            status(f"{name}: no verified match ({detail}) - chunk deleted")
+                f"best AS-norm {scan['best_score']:.2f}")
+            status(f"{name}: no match ({detail}) - chunk deleted")
             for p in (audio_path, video_path):
                 if os.path.exists(p):
                     os.remove(p)

@@ -37,7 +37,7 @@ from siamese_model import SiameseAudioModel
 PROJECT_ROOT = os.environ.get("SIAMESE_PROJECT_ROOT", os.path.dirname(CORE_DIR))
 # Override with the SIAMESE_WEIGHTS env var to A/B different checkpoints
 WEIGHTS_PATH = os.environ.get(
-    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "best_siamese_model.pth"))
+    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "siamese_v3_best.pth"))
 # Override with SIAMESE_AUDIO_DIR to score against preprocessed audio
 AUDIO_DIR = os.environ.get("SIAMESE_AUDIO_DIR", os.path.join(PROJECT_ROOT, "audios"))
 SAMPLE_RATE = 16000
@@ -46,7 +46,7 @@ DEFAULT_TOP_K = 50
 # --- Embedding backend selection (siamese/optimizations) ---
 # SIAMESE_BACKEND=wavlm switches the whole pipeline (anchor conversion,
 # cohort, calibration, detection) to mean-pooled mid-layer features of a
-# frozen SSL backbone. Validated on Set D (see pipeline/eval_scoring_ab.py):
+# frozen SSL backbone. Validated on Set D (WavLM layer 10, macro AP 1.0).
 # wavlm-base-plus layer 10 ranks all 4 keywords perfectly (AP 1.0) where the
 # trained wav2vec2-base+head baseline scores AP 0.586.
 BACKEND = os.environ.get("SIAMESE_BACKEND", "baseline").strip().lower()

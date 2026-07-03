@@ -97,7 +97,8 @@ def main():
     if keyword is None:
         kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
         if not os.path.exists(kw_file):
-            print("No --keyword given and selected_keyword.txt not found. Run transcriber.py first.")
+            print("No --keyword given and selected_keyword.txt not found. "
+                  "Pass --keyword <word>.")
             return
         with open(kw_file) as f:
             keyword = f.read().strip()

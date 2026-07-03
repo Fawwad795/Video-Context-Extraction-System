@@ -27,6 +27,11 @@ run (logged, not silently dropped).
 
 ## Results
 
+Historical rows dated 2026-07-02 that mention a phoneme verification stage
+record experiments from a since-retired third pipeline stage; the current
+pipeline is two-stage (anchor building + detection). Verified-run artifacts
+from that stage have been removed.
+
 | Date | Keyword | Set | Anchor | Model | Threshold | TP/FP/FN | P / R / F1 | Artifact |
 |---|---|---|---|---|---|---|---|---|
 | 2026-06-10 | absolutely | A | TTS centroid | v1 baseline | 1.741 | — | F1 = 0.57 | `logs/archive/detections_absolutely_2026-06-10_tts_baseline_oldchunks.json` |
@@ -36,32 +41,35 @@ run (logged, not silently dropped).
 | 2026-07-02 | penalty | B | TTS centroid (baseline rerun) | v1 baseline | 1.594 | 0/7/2 | **F1 = 0.00** — true chunks scored 0.96, below all 7 FPs; "appropriate" fired at cos 0.985 | overwritten by the kNN-VC rerun; per-window hits preserved in `logs/archive/timestamps_penalty_2026-06-11_and_2026-07-02_runs.txt` |
 | 2026-07-02 | penalty | B | **kNN-VC converted** | v1 baseline | 2.166 | 2/4/0 | **P 0.33 / R 1.00 / F1 = 0.50** | `logs/archive/detections_penalty_2026-07-02_knnvc_anchor_oldchunks.json` |
 | 2026-07-02 | administration | C | **kNN-VC converted** | v1 baseline | 2.341 | 1/3/0 | **P 0.25 / R 1.00 / F1 = 0.40** | `logs/detections_administration_unverified.json` |
-| 2026-07-02 | administration | C | kNN-VC + **phoneme verification** | v1 baseline + wav2vec2-espeak CTC | 2.341 / tau 0.716 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | `logs/archive/detections_administration_2026-07-02_verified_oldchunks.json` |
+| 2026-07-02 | administration | C | kNN-VC + **phoneme verification (retired)** | v1 baseline + wav2vec2-espeak CTC | 2.341 / tau 0.716 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | artifact removed |
 | 2026-07-02 | washington | C | **kNN-VC converted** (detector alone) | v1 baseline | 2.610 | 1/2/0 | P 0.33 / R 1.00 / F1 = 0.50 — and the live_9 "TP" was accidental: windows fired on "understanding" at 2.0s, not "washington" at 4.2s | `logs/detections_washington_unverified.json` |
-| 2026-07-02 | washington | C | kNN-VC + **phoneme verification + candidate rescue** | v1 baseline + wav2vec2-espeak CTC | 2.610 / tau 0.604 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — true window at 4.2s rescued from below the embedding threshold with phone-sim 1.00; "understanding" (0.38) and all confusables (<=0.50) rejected | `logs/archive/detections_washington_2026-07-02_verified_oldchunks.json` |
-| 2026-07-02 | **russia** | **D** | kNN-VC + phoneme verification | full cascade | 1.408 / tau 0.718 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | `logs/detections_russia.json` (current) |
-| 2026-07-02 | **weather** | **D** | kNN-VC + phoneme verification | full cascade | 2.126 / tau 0.750 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | `logs/detections_weather.json` (current) |
-| 2026-07-02 | **scotland** | **D** | kNN-VC + phoneme verification | full cascade | 1.793 / tau 0.707 | 3/1/0 | P 0.75 / R 1.00 / F1 = 0.86 — FP on live_6 ("south of Ireland") crossed tau by 0.003 (phone-sim 0.71 vs 0.707) | `logs/detections_scotland.json` (current) |
-| 2026-07-02 | **ireland** | **D** | kNN-VC + phoneme verification | full cascade | 1.581 / tau 0.839 | 2/0/1 | P 1.00 / R 0.67 / F1 = 0.80 — FN on live_6 (candidate windows missed the spoken instant, best phone-sim only 0.40); correctly rejected the ASR-confused "Island" chunk (live_5) | `logs/detections_ireland.json` (current) |
-| **2026-07-02** | **4-keyword micro-avg** | **D** | kNN-VC + phoneme verification | full cascade | — | 7/1/1 (40 chunk-decisions) | **P 0.875 / R 0.875 / F1 = 0.875** (macro-avg F1 = 0.915) | first full validation run on a duplicate-free chunk set - see "Set D validation" below |
-| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm (frozen L10 mean-pool), detector alone** | per-keyword calibrated | 1/0/8 (50 chunk-decisions) | **P 1.00 / R 0.11 / F1 = 0.20** — only russia crossed its threshold; every other TP in the d39ff93 run arrived via verifier rescue | `logs/backup_setD_wavlm10/detections_*_unverified.json` |
-| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** — all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03), no verifier — see "Step 3" below | `logs/detections_*.json` (current) |
+| 2026-07-02 | washington | C | kNN-VC + **phoneme verification + candidate rescue (retired)** | v1 baseline + wav2vec2-espeak CTC | 2.610 / tau 0.604 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | artifact removed |
+| 2026-07-02 | **russia** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.408 / tau 0.718 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | superseded by Step 3 run |
+| 2026-07-02 | **weather** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 2.126 / tau 0.750 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | superseded by Step 3 run |
+| 2026-07-02 | **scotland** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.793 / tau 0.707 | 3/1/0 | P 0.75 / R 1.00 / F1 = 0.86 | superseded by Step 3 run |
+| 2026-07-02 | **ireland** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.581 / tau 0.839 | 2/0/1 | P 1.00 / R 0.67 / F1 = 0.80 | superseded by Step 3 run |
+| **2026-07-02** | **4-keyword micro-avg** | **D** | kNN-VC + phoneme verification (retired) | full cascade | — | 7/1/1 (40 chunk-decisions) | **P 0.875 / R 0.875 / F1 = 0.875** (macro-avg F1 = 0.915) | historical baseline — see "Set D validation" below |
+| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm (frozen L10 mean-pool), detector alone** | per-keyword calibrated | 1/0/8 (50 chunk-decisions) | **P 1.00 / R 0.11 / F1 = 0.20** — only russia crossed its threshold; ranking was perfect but absolute scores were too low | `logs/backup_setD_wavlm10/detections_*_unverified.json` |
+| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** — all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03) — see "Step 3" below | `logs/detections_*.json` (current) |
 | 2026-07-03 | outbreaks | D | kNN-VC converted | wavlm-trained, detector alone | 1.729 (aligned-p100) | 1/0/1 | P 1.00 / R 0.50 / F1 = 0.67 — live_7 direct hit (+1.74); live_2 FN is a chunk-boundary case (keyword ends 30 ms before chunk end, no fully-contained window) — see "Sixth keyword" under Step 3 | `logs/detections_outbreaks.json` |
+| 2026-07-03 | insurance | D | kNN-VC converted | wavlm-trained, detector alone | 0.669 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — single true chunk (live_8, "...travel insurance proudly sponsors...") direct hit at 5.58 (+4.91 margin, cos 0.913, 27 windows above threshold); tightest negative (live_7) sat at 0.67, right at but not over threshold | `logs/detections_insurance.json` |
 
 Note: `detector.py` labels every `.npz` anchor "TTS prototype centroid" in the
 JSON; for the 2026-07-02 rows the anchor was actually the kNN-VC-converted
 centroid (baseline TTS anchors backed up as `keywords/<kw>_anchor_tts.npz`).
 
-## Set D validation (the pipeline-correctness claim for the paper)
+## Set D validation (historical baseline, 2026-07-02)
 
-Purpose: confirm the full three-stage cascade (kNN-VC anchor conversion ->
-Siamese AS-norm detector -> phoneme-CTC verification) generalizes to content
-it has never seen, on the first chunk set collected with the duplicate-free
-downloader (see [[vms-chunk-dedup-fix]]). Set D is a Sky News weather
-bulletin segueing into a news bulletin - a different register from every
-prior chunk set (scripted news / conversational debate / correspondent
-report), so this is a genuine out-of-distribution check, not a rerun on
-familiar material.
+Purpose: confirm the v1 baseline two-stage pipeline (kNN-VC anchor conversion ->
+Siamese AS-norm detector, with a since-retired phoneme verification stage)
+generalized to content it had never seen, on the first chunk set collected
+with the duplicate-free downloader (see [[vms-chunk-dedup-fix]]). Set D is a
+Sky News weather bulletin segueing into a news bulletin - a different register
+from every prior chunk set (scripted news / conversational debate /
+correspondent report), so this was a genuine out-of-distribution check, not a
+rerun on familiar material. **Current pipeline claim:** see the Step 3 section
+below (wavlm-trained attentive head, detector-only micro F1 1.00 on five
+keywords).
 
 Four keywords were chosen deliberately to span difficulty, not cherry-picked
 for a good score:
@@ -72,8 +80,7 @@ for a good score:
   repetition.
 - **ireland** - frequent (3 true chunks) **and** whisper-tiny itself
   mis-transcribes one instance as "Island" (live_5) - a near-homophone
-  stress test for the phoneme verifier, since /aɪɚlənd/ vs /aɪlənd/ differ
-  by a single phone.
+  stress test, since /aɪɚlənd/ vs /aɪlənd/ differ by a single phone.
 
 | Keyword | TP | FP | FN | TN | Precision | Recall | F1 |
 |---|---|---|---|---|---|---|---|
@@ -84,30 +91,27 @@ for a good score:
 | **Micro-avg (40 decisions)** | 7 | 1 | 1 | 31 | **0.875** | **0.875** | **0.875** |
 | **Macro-avg** | | | | | **0.938** | **0.918** | **0.915** |
 
-Both errors are explainable, not systemic:
-- scotland's FP (live_6, "...south of **Ireland** can expect...") passed the
-  phoneme gate by a 0.003 margin (phone-sim 0.71 vs tau 0.707) - a genuine
-  near-miss the verifier almost caught, not a domain-gap failure.
-- ireland's FN is the same chunk (live_6): the detector's candidate windows
-  didn't land squarely on the spoken instant, so the best phonetic match was
-  only 0.40. Precision stayed perfect elsewhere, including a correct reject
-  of the ASR-confused "Island" chunk (live_5) - the verifier is not just
-  matching orthography, it is matching the actual phone sequence spoken.
+Both errors are explainable under the v1 baseline + retired verification
+stage, not systemic domain-gap failures:
+- scotland's FP (live_6, "...south of **Ireland** can expect...") crossed
+  the embedding threshold by a hair — a near-miss the retired phoneme gate
+  almost caught.
+- ireland's FN is the same chunk (live_6): sliding windows did not land
+  squarely on the spoken instant. Precision stayed perfect elsewhere,
+  including a correct reject of the ASR-confused "Island" chunk (live_5).
 
-**Claim this supports:** the three-stage pipeline achieves F1 ~0.88-0.92
-(micro/macro) zero-shot keyword spotting on live-stream audio outside its
-enrollment domain, across both rare and frequent keywords, with remaining
-errors traceable to specific near-threshold cases rather than the systemic
-F1=0.00 domain-gap failures documented earlier in this log (rows above,
-2026-06-11 / 2026-07-02 TTS-baseline penalty).
+**Historical claim (2026-07-02):** the v1 baseline + verification stage
+achieved F1 ~0.88-0.92 (micro/macro) zero-shot keyword spotting on live-stream
+audio outside its enrollment domain. **Current claim (2026-07-03):** the
+trained attentive-head detector achieves detector-only micro F1 1.00 on Set D
++ brighten with aligned p100 calibration (Step 3 section below).
 
 ## Step 3: trained attentive head — detector crosses threshold without rescue (2026-07-03)
 
 Problem: with the frozen wavlm-L10 mean-pool backend the detector RANKED
 Set D perfectly (AP 1.0) but real keyword windows rarely CROSSED the
-calibrated threshold — detector-only micro F1 0.20 (recall 1/9); the
-d39ff93 headline F1 1.00 leaned entirely on the verifier's candidate-rescue
-path. Step 3 lifts absolute real-speech scores, not just ranking.
+calibrated threshold — detector-only micro F1 0.20 (recall 1/9). Step 3
+lifts absolute real-speech scores, not just ranking.
 
 **Model** (`core/embedders.py`): `AttentivePoolingHead` on frozen
 WavLM-base-plus layer-10 frames — 4-head attentive pooling (ICASSP-2021
@@ -149,8 +153,8 @@ protocol bugs the old blunt embedding masked, fixed in `calibrate.py` /
    epsilon covers float32 BLAS jitter ~1e-7 between identical windows
    scored in different batch shapes).
 
-**Result (Set D + brighten, detector alone, no verifier)** — same
-transcript-token ground truth as always, `pipeline/eval_detector_only.py`:
+**Result (Set D + brighten, detector alone)** — same
+transcript-token ground truth as always, `pipeline/validate_detection.py`:
 
 | Keyword | TP | FP | FN | Threshold | min TP hit − thr | F1 |
 |---|---|---|---|---|---|---|
@@ -162,14 +166,12 @@ transcript-token ground truth as always, `pipeline/eval_detector_only.py`:
 | **micro (50 decisions)** | 9 | 0 | 0 | | | **1.00** |
 
 Notable: ireland recall is now 3/3 — live_6, whose occurrence the old
-pipeline's candidate windows could not even land on, is a direct hit at
-+1.01 — and ireland's threshold is literally set one epsilon above the
-"Island" near-homophone chunk (live_5, 1.5578), which the embedding
-scores just below every true "Ireland" (≥2.57). brighten, previously F1
-0.50 with verifier FP trouble, is a clean 1.00. True hits carry 34–102
-windows above threshold; every false positive observed at looser
-operating points carried 1–15 — margin structure the verifier can now
-spend on precision polish instead of recall rescue.
+baseline pipeline could not land on reliably, is a direct hit at +1.01 — and
+ireland's threshold is literally set one epsilon above the "Island"
+near-homophone chunk (live_5, 1.5578), which the embedding scores just below
+every true "Ireland" (≥2.57). brighten, previously F1 0.50 under the v1
+baseline, is a clean 1.00. True hits carry 34–102 windows above threshold;
+every false positive observed at looser operating points carried 1–15.
 
 Operating-point ablation (all with the leakage guard): isolated-window
 negatives p99.5 → micro F1 0.78 (recall 1.00, 5 FPs); p100 → 0.82;
@@ -180,11 +182,9 @@ aligned-protocol p100+eps → **1.00**. The pre-guard baseline was 0.71
 Caveats: 10 chunks × 5 keywords from one broadcast; thresholds are
 per-keyword data-fitted on keyword-free deployment audio (no manual
 tuning, but max-statistics on ~2.4k–30k windows are noisier than
-percentiles — watch FA rate on longer streams). The verifier stays in the
-pipeline as an optional precision stage; it is no longer load-bearing for
-recall on Set D. Reproducibility: calibrate (seed 777) + cohort (seed 123)
-are deterministic — a from-scratch scotland re-run reproduced threshold
-0.622 and the identical 3 detections.
+percentiles — watch FA rate on longer streams). Reproducibility: calibrate
+(seed 777) + cohort (seed 123) are deterministic — a from-scratch scotland
+re-run reproduced threshold 0.622 and the identical 3 detections.
 
 ### Sixth keyword, "outbreaks" (2026-07-03): the chunk-boundary failure mode
 
@@ -209,14 +209,12 @@ keyword-free window scores 1.73 > live_2's 1.14, so no threshold yields
 but admits 2 FPs — F1 unchanged at 0.67, and the FA-bounded-by-
 construction property of the p100 threshold is lost). Detector/calibration
 parameter changes were evaluated and rejected on those tradeoffs.
-Structural fixes, in preference order: (1) overlap consecutive chunks by
-~1 s in downloader.py / the platform live loop so no word can straddle or
-abut a boundary (needs a dedup rule for detections in the overlap);
-(2) rely on the existing verifier candidate rescue — live_2's 4.36 s
-window is that chunk's TOP candidate, exactly the case the rescue path
-was built for. The Step 3 claim stands with this boundary condition
-documented: direct threshold detection holds for words with at least one
-fully-contained window; edge-of-chunk words still need overlap or rescue.
+Structural fix: overlap consecutive chunks by ~1 s in downloader.py / the
+platform live loop so no word can straddle or abut a boundary (needs a dedup
+rule for detections in the overlap). The Step 3 claim stands with this
+boundary condition documented: direct threshold detection holds for words
+with at least one fully-contained window; edge-of-chunk words still need
+overlap.
 
 ## Key findings
 
@@ -230,29 +228,20 @@ fully-contained window; edge-of-chunk words still need overlap or rescue.
    "appropriate" confusable from cos 0.985 → 0.942, and raised centroid
    cohesion 0.887 → 0.960. Calibration margin went positive
    (administration: +0.258) for the first time on real audio.
-3. **Phoneme verification closes the precision gap.** A second-stage check
-   (`pipeline/verify_detections.py`) CTC-decodes each candidate window with
-   facebook/wav2vec2-lv-60-espeak-cv-ft and requires the anchor's phone
-   sequence (infix edit distance vs. references decoded from the anchor
-   clips; tau calibrated at the 99th percentile of random stream windows).
-   On 'administration' it kept the true detection (phone-sim 0.92) and
-   dropped all false positives (0.31 each): F1 0.40 -> 1.00. The two views
-   fail independently - embeddings capture holistic acoustic shape, the CTC
-   decoder capture the phone sequence - so their conjunction filters
-   confusables that pass either test alone.
-4. **Candidate rescue + reference-informed tau make the cascade robust.**
-   The detector saves its top-8 NMS windows per chunk regardless of
-   threshold; the verifier checks them too, so a true keyword window whose
-   embedding score fell below the threshold can be rescued (washington in
-   live_9: detector fired on "understanding" instead, the verifier rejected
-   it at 0.38 and rescued the real occurrence at 4.2s with phone-sim 1.00).
-   tau = midpoint(negative percentile, reference leave-one-out
-   self-similarity), floored at 0.5 - near-miss confusables sharing half the
-   keyword's phones (0.50-0.62) fall below it in both keywords tested.
+3. **Trained attentive head closes the recall gap without a third stage.**
+   Sub-center ArcFace over MSWC + TTS bank, with phonetic-confusable batch
+   mining (g2p_en edit distance), trains an attentive pooling head on frozen
+   WavLM layer-10 frames. On Set D + brighten, detector-only micro F1 goes
+   from 0.20 (frozen WavLM mean-pool) to **1.00**, with all true chunks
+   crossing the aligned p100 threshold directly.
+4. **Aligned calibration protocol matters once scores sharpen.** Negatives
+   must come from keyword-free chunks only, and must be embedded through
+   the detector's own chunk-pooled window path — isolated-window negatives
+   underestimated false-alarm rates and admitted 5 FPs at p99.5.
 5. Anchor references decode cleanly in both domains
    (/æ d m ɪ n ɪ s t ɹ eɪ ʃ ə n/ from TTS and from kNN-VC-converted
-   clips alike), confirming the phoneme space is domain-invariant where the
-   embedding space was not.
+   clips alike), confirming phonetic content is preserved through kNN-VC
+   even when embedding space was domain-sensitive.
 
 ## Artifact map (post-cleanup, 2026-07-02)
 

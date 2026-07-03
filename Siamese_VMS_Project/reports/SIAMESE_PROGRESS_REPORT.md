@@ -90,7 +90,7 @@ live audio windows ──► wav2vec2-base (frozen) ──► 256-d projection h
 - Combined loss: `L = (1 - β) × TripletLoss + β × BCE(domain | GRL(embedding))`
 - β ramp over `beta_ramp` epochs (avoids early training instability)
 - `eval_cross_domain_auc()` — TTS centroid vs real human clips on held-out eval words
-- Warmstart from `best_siamese_model.pth`
+- Warmstart from `siamese_v1_best.pth`
 
 **Infrastructure (AWS g6.xlarge, NVIDIA L4):**
 - `tts_bank.py` — generated 1650 words × 5 voices = 8085 TTS clips; 150 eval words held out
@@ -121,8 +121,7 @@ live audio windows ──► wav2vec2-base (frozen) ──► 256-d projection h
 - v2-run2: F1=0 — confusables still outrank true keyword
 
 **Saved checkpoints (local):**
-- `siamese_v2_best.pth` (run2, β=0.05)
-- `siamese_v2_run1_beta30_best.pth` (run1)
+- `siamese_v2_best.pth` (run2, β=0.05) — run1 (β=0.30) metrics are in the table above; checkpoint retired after the experiment concluded
 - `scoring.py` honors `SIAMESE_WEIGHTS` env var to select checkpoint
 
 **Conclusion:** Head-only retraining with GRL hit an architecture ceiling (~+1 pt AUC). The frozen wav2vec2 backbone cannot be made domain-invariant via the head alone — the domain information is too deeply encoded. Next lever to try: unfreeze top wav2vec2 transformer layers during GRL training. Alternatively, abandon audio anchors entirely (→ Phase 3 / PhonMatchNet).
@@ -158,7 +157,6 @@ Siamese_VMS_Project/
 ├── transcribe_chunks.py    # Whisper ASR (ground truth)
 ├── train_siamese_v2.py     # GRL domain-adversarial training (Phase 2)
 ├── augment_utils.py        # pitch/stretch/RIR/noise augmentation
-├── denoise_chunks.py       # noisereduce front-end (experimental)
 ├── downloader.py           # live stream chunk downloader
 └── logs/                   # detection JSON outputs (gitignored)
 ```
