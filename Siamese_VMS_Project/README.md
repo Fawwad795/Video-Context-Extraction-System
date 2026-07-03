@@ -3,63 +3,62 @@
 ## What This Project Does
 
 Give the system a **word** and a **live video/audio stream**, and it tells
-you when that word gets spoken, without ever running a full speech-to-text
-transcript, and without any recording of that word said in that exact voice.
+you when that word gets spoken — without running full speech-to-text on the
+live feed, and without any recording of that word in that exact voice.
 
-You type a keyword like `"washington"`. The system:
-1. **Imagines** how that word sounds using text-to-speech (many synthetic
-   voices, not a real recording).
-2. **Repaints** that imagined sound into something that sounds like it came
-   from this specific stream (same speaker/mic/room tone).
-3. **Scans** the live audio in small time-slices, comparing each slice's
-   "sound fingerprint" to the keyword's fingerprint.
-4. **Flags** slices whose fingerprint score crosses a calibrated threshold
-   (Adaptive S-norm against an impostor cohort).
+You type a keyword like `"cloudy"`. The system:
+1. **Imagines** how that word sounds using text-to-speech (~30 synthetic voices).
+2. **Repaints** that sound into the stream's own voice (kNN-VC voice conversion).
+3. **Scans** live audio in sliding windows and scores each against the keyword
+   embedding with Adaptive S-norm (AS-norm).
+4. **Flags** windows whose score crosses a per-keyword calibrated threshold.
 
-The result: it can catch a keyword nobody ever recorded, spoken by a
-newsreader nobody trained the system on, inside a live stream it has never
-seen, with no live transcription step slowing things down.
+The result: zero-shot keyword spotting on live news audio — no enrollment
+recording, no live ASR pass, no retraining per stream.
+
+For a GUI that monitors a YouTube URL in real time, see
+[`platform/README.md`](platform/README.md) (`python platform/gui.py`).
 
 ## Why This Is Hard (The Core Problem)
 
-The obvious approach (synthesize the keyword with TTS, then check "does
-this window of live audio sound like my synthetic clip?") mostly doesn't
-work. A computer-generated voice and a real human voice look completely
-different to a neural network, even when they're saying the exact same
-word. It's like trying to recognize a friend's face using only a cartoon
-drawing of them: the shape is the same, but a face-recognition model
-trained on real photos may not see the resemblance at all. We call this
-the **synthetic-to-real domain gap**, and it was the single biggest
-failure mode in this project (see [Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md)
-for the measured failures: F1 = 0.00 on conversational speech with a raw
-TTS anchor).
+Raw TTS compared directly to human speech mostly fails: a synthetic voice and
+a real voice land in different regions of embedding space even when saying
+the same word. We call this the **synthetic-to-real domain gap** — it was
+the single biggest early failure mode (F1 = 0.00 on conversational speech
+with a raw TTS anchor; see
+[reports/EXPERIMENT_LOG.md](reports/EXPERIMENT_LOG.md)).
+
+Two fixes stack on each other:
+- **Stage 1 (kNN-VC)** moves the anchor into the stream's acoustic domain.
+- **Stage 2 (trained detector head)** lifts real-speech scores so true keyword
+  windows cross the calibrated threshold directly — no third verification stage.
 
 ## How It Works: The Two-Stage Pipeline
 
 ```mermaid
 flowchart TD
-    KW(["Keyword text<br/><b>e.g. 'washington'</b>"])
-    STREAM(["Live stream audio<br/><b>10 chunks</b>"])
-    RESULT(["Confirmed detections<br/><b>+ timestamps</b>"])
+    KW(["Keyword text<br/><b>e.g. 'cloudy'</b>"])
+    STREAM(["Live stream audio"])
+    RESULT(["Detections<br/><b>+ timestamps</b>"])
 
-    subgraph S1["STAGE 1 &nbsp; Anchor Building"]
+    subgraph S1["STAGE 1 — Anchor Building"]
         direction TB
-        TTS["Synthesize the keyword<br/>~30 TTS voices"]
-        CENTROID["Average into an<br/>L2-normalized centroid"]
-        KNNVC["kNN-VC voice conversion<br/>re-voiced into the stream's own sound"]
+        TTS["~30 TTS voices<br/>SpeechT5 + HiFi-GAN"]
+        CENTROID["L2-normalized centroid"]
+        KNNVC["kNN-VC into stream voice"]
         TTS --> CENTROID --> KNNVC
     end
 
-    subgraph S2["STAGE 2 &nbsp; Detection"]
+    subgraph S2["STAGE 2 — Detection"]
         direction TB
-        SLIDE["Slide a window across the audio<br/>0.6x / 0.8x / 1.0x scales"]
-        EMBED["Siamese embedding<br/>wav2vec2 backbone + projection head"]
-        ASNORM["Adaptive S-norm scoring<br/>vs. an impostor cohort"]
+        SLIDE["Multi-scale windows<br/>0.6× / 0.8× / 1.0×, 50 ms hop"]
+        EMBED["WavLM L10 frames<br/>+ attentive pooling head"]
+        ASNORM["AS-norm vs impostor cohort<br/>→ threshold decision"]
         SLIDE --> EMBED --> ASNORM
     end
 
     KW --> TTS
-    STREAM -. reference audio .-> KNNVC
+    STREAM -. reference .-> KNNVC
     KNNVC --> EMBED
     STREAM --> SLIDE
     ASNORM --> RESULT
@@ -78,168 +77,184 @@ flowchart TD
 
 ### Stage 1: Anchor Building (Bridging the Domain Gap)
 
-**Intuition:** we can't record a human saying every possible keyword in
-advance, so we fake it with text-to-speech, but a robot-voice comparison
-against real human audio doesn't work well (the domain gap above). So we
-take the extra step of re-voicing the synthetic clip so it sounds like it
-came from the actual stream.
+**Intuition:** synthesize the keyword, then re-voice it with real stream audio
+so the anchor lives in the same acoustic world as the broadcast.
 
-**Technical:** `pipeline/keyword_generator.py` synthesizes the keyword with
-~30 voices (SpeechT5 + HiFi-GAN: the 7 canonical CMU ARCTIC speakers, random
-utterance-level x-vectors, and cross-speaker x-vector blends), augments each
-clip (pitch/tempo/noise/reverb), embeds everything with the Siamese model,
-and averages into an L2-normalized **centroid anchor**. Then
-`pipeline/convert_anchor_knnvc.py` runs each TTS clip through
-**[kNN-VC](https://github.com/bshall/knn-vc)** (WavLM features + k-nearest-neighbor
-regression + a prematched HiFi-GAN vocoder, no training required), using
-non-keyword segments of the live stream as the voice reference. Every output
-frame is literally reassembled from real stream audio, so the converted
-anchor sits in the real acoustic domain instead of the synthetic one.
-Chunks that contain the keyword are excluded from the reference pool to
-avoid leaking the answer into the anchor.
+**Technical:** `pipeline/keyword_generator.py` builds a multi-voice TTS
+prototype (SpeechT5 + HiFi-GAN: CMU ARCTIC speakers, random x-vectors, and
+cross-speaker blends), augments clips, embeds them, and averages a centroid.
+`pipeline/convert_anchor_knnvc.py` runs each clip through
+**[kNN-VC](https://github.com/bshall/knn-vc)** (WavLM + kNN regression +
+prematched HiFi-GAN), using non-keyword stream chunks as the reference pool
+(transcript-checked, so keyword-bearing chunks are excluded).
 
-### Stage 2: Detection (Siamese Network + Adaptive Scoring)
+### Stage 2: Detection (WavLM + Attentive Head + AS-norm)
 
-**Intuition:** slide a small window across the audio, ask a neural network
-"does this sound like the keyword?", and flag the windows that do, but
-calibrate "does" relative to what background speech normally scores
-instead of a fixed number, so accents, pace, and room acoustics don't need
-re-tuning by hand.
+**Intuition:** slide windows across each chunk, score similarity to the
+anchor, normalize against impostors, and accept windows above a threshold
+fit on keyword-free stream audio.
 
-**Technical:** the backbone is `facebook/wav2vec2-base` (frozen) feeding a
-trained 256-d L2-normalized projection head (`core/siamese_model.py`,
-`core/scoring.py`). `pipeline/detector.py` slides windows at multiple
-scales (0.6x/0.8x/1.0x of the anchor duration, since spoken pace varies) and
-scores each by cosine similarity, then applies **Adaptive S-norm**:
+**Production backend** (`SIAMESE_BACKEND=wavlm-trained`, default weights
+`checkpoints/siamese_v3_best.pth`):
+
+- **Backbone:** frozen `microsoft/wavlm-base-plus`, **layer 10** frame features
+  (word identity peaks in mid layers, not the last layer).
+- **Head:** trained attentive pooling + projection
+  (`core/embedders.py`, `training/train_siamese_v3.py`) — sub-center ArcFace
+  over MSWC + TTS bank with phonetic-confusable batches.
+- **Scoring:** cosine similarity → **Adaptive S-norm** against a per-keyword
+  cohort (`pipeline/cohort_builder.py`):
 
 $$
 s_{\text{norm}} = \frac{1}{2}\left(\frac{s - \mu_a}{\sigma_a} + \frac{s - \mu_w}{\sigma_w}\right)
 $$
 
-where $(\mu_a, \sigma_a)$ and $(\mu_w, \sigma_w)$ are the mean and standard
-deviation of the top-$k$ closest-impostor scores from a per-keyword cohort
-(`pipeline/cohort_builder.py`), computed on the anchor side and the window
-side respectively. The accept threshold is fitted per keyword by
-`pipeline/calibrate.py` as an empirical false-alarm bound on keyword-free
-stream windows (aligned with the detector's sliding-window protocol), not a
-hand-picked distance. With the trained attentive head backend
-(`SIAMESE_BACKEND=wavlm-trained`), true keyword windows on Set D cross this
-threshold directly with large margins; see
-[Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
+- **Detector:** `pipeline/detector.py` — multi-scale windows, 50 ms hop
+  (must match calibration). Frame backends embed each chunk with one forward
+  pass and pool windows from contextualized frames (~100× faster than
+  per-window embedding).
+- **Threshold:** `pipeline/calibrate.py` — max score on keyword-free windows
+  embedded through the **same detector protocol** (chunk context, all scales,
+  50 ms grid). Use `--fa-percentile 100 --negatives 40000` with the trained
+  head; negatives are drawn only from chunks that do not contain the keyword
+  (transcript token check).
 
-## Does It Actually Work? (Validation Results)
+**Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
+Phase-1 linear projection head (`core/siamese_model.py`,
+`checkpoints/siamese_v1_best.pth`). Kept for comparison; not the production path.
 
-The clearest evidence is the most recent validation run on Set D (Sky News
-weather bulletin), with five keywords deliberately chosen to span
-difficulty, using the trained attentive-head detector
-(`SIAMESE_BACKEND=wavlm-trained`, aligned p100 calibration):
+## Does It Actually Work?
+
+Set D validation (Sky News weather bulletin, 10 unique chunks,
+`audios/transcripts.txt` ground truth) with `wavlm-trained` and aligned
+p100 calibration:
 
 | Keyword | Difficulty | Precision | Recall | F1 |
 |---|---|---|---|---|
-| russia | rare (1 true chunk), distinct | 1.00 | 1.00 | 1.00 |
-| weather | rare (1 true chunk), distinct | 1.00 | 1.00 | 1.00 |
-| scotland | frequent (3 true chunks) | 1.00 | 1.00 | 1.00 |
-| ireland | frequent (3), near-homophone ("Island") stress test | 1.00 | 1.00 | 1.00 |
-| brighten | rare (1 true chunk) | 1.00 | 1.00 | 1.00 |
-| **Aggregate (50 chunk decisions)** | | **1.00** | **1.00** | **1.00** |
+| russia | rare (1 chunk) | 1.00 | 1.00 | 1.00 |
+| weather | rare (1 chunk) | 1.00 | 1.00 | 1.00 |
+| scotland | frequent (3 chunks) | 1.00 | 1.00 | 1.00 |
+| ireland | frequent (3), near-homophone ("Island") | 1.00 | 1.00 | 1.00 |
+| brighten | rare (1 chunk) | 1.00 | 1.00 | 1.00 |
+| **Micro-avg (50 decisions)** | | **1.00** | **1.00** | **1.00** |
 
-Full breakdown, per-chunk detail, and every historical experiment
-(including the F1 = 0.00 domain-gap failures that motivated Stage 1 and
-the trained detector head) are in
-[Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md).
+Additional ad-hoc runs (same chunk set): `cloudy` (2 true chunks) F1 = 1.00;
+`outbreaks` F1 = 0.67 (one chunk-boundary FN documented in the experiment log).
+
+Full history, ablations, and failure analyses:
+[reports/EXPERIMENT_LOG.md](reports/EXPERIMENT_LOG.md),
+[reports/SIAMESE_PROGRESS_REPORT.md](reports/SIAMESE_PROGRESS_REPORT.md).
+
+## Configuration
+
+Set these before running the pipeline (PowerShell example):
+
+```powershell
+$env:SIAMESE_BACKEND = "wavlm-trained"
+$env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
+```
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SIAMESE_BACKEND` | `baseline` | `wavlm-trained` (production), `wavlm`, or `baseline` |
+| `SIAMESE_WEIGHTS` | `checkpoints/siamese_v3_best.pth` | Checkpoint for baseline backend |
+| `SIAMESE_V3_WEIGHTS` | `checkpoints/siamese_v3_best.pth` | Attentive-head weights for `wavlm-trained` |
+| `SIAMESE_PROJECT_ROOT` | project root | Redirect all data paths (used by `platform/`) |
+| `SIAMESE_BACKBONE` | `microsoft/wavlm-base-plus` | SSL model for WavLM backends |
+| `SIAMESE_LAYER` | `10` | Transformer layer for frame features |
+
+Non-baseline backends write suffixed artifacts (e.g.
+`keywords/cloudy_anchor_wavlm10ft.npz`) so runs do not overwrite each other.
 
 ## Project Layout
 
 ```
 Siamese_VMS_Project/
-├── core/         shared modules: siamese_model.py (network), scoring.py (embedding,
-│                 AS-norm, cohort utils), augment_utils.py (audio augmentation)
-├── pipeline/     the detection pipeline, in run order: downloader.py -> transcribe_chunks.py
-│                 -> keyword_generator.py -> convert_anchor_knnvc.py (recommended)
-│                 -> cohort_builder.py -> calibrate.py -> detector.py ->
-│                 validate_detection.py
-├── training/     offline model training (AWS): train_siamese_v1.py (Phase 1),
-│                 train_siamese_v2.py + dataset_v2.py + tts_bank.py (Phase 2 GRL),
-│                 train_siamese_v3.py + dataset_v3.py (Step 3 attentive head),
-│                 deploy_phase*.ps1 launch scripts
-├── checkpoints/  trained weights (siamese_v1_best.pth = Phase 1 baseline;
-│                 siamese_v2_best.pth = Phase 2; siamese_v3_best.pth = Step 3 head;
-│                 select via SIAMESE_WEIGHTS / SIAMESE_BACKEND env vars)
-├── keywords/     generated anchors, calibrations, cohorts (per keyword)
-├── audios/ videos/  downloaded live-stream chunks + transcripts.txt (ground truth)
-├── logs/         detection outputs (logs/archive/ = retired chunk-set runs)
-└── Reports/      EXPERIMENT_LOG.md (results ledger) + SIAMESE_PROGRESS_REPORT.md (narrative)
+├── core/           siamese_model.py (Phase-1 head), embedders.py (WavLM backends),
+│                   scoring.py (AS-norm, paths, backends), augment_utils.py
+├── pipeline/       offline research pipeline (run order below)
+├── platform/       live YouTube monitoring GUI (isolated under platform/data/)
+├── training/       AWS training scripts: v1 triplet, v2 GRL, v3 attentive head
+├── checkpoints/    siamese_v1_best.pth, siamese_v2_best.pth, siamese_v3_best.pth
+├── keywords/       generated anchors, cohorts, calibrations (gitignored, rebuildable)
+├── audios/ videos/ Set D chunks + transcripts.txt (ground truth)
+├── logs/           detection JSON + archive of historical runs
+└── reports/        experiment log + progress report
 ```
 
-Run pipeline scripts from the project root, e.g. `python pipeline/detector.py --keyword washington`.
+### Pipeline scripts (run from project root)
 
-## Model Architecture (Siamese Network)
+| Step | Script | Output |
+|---|---|---|
+| 1 | `downloader.py` | `audios/`, `videos/` |
+| 2 | `transcribe_chunks.py` | `audios/transcripts.txt` |
+| 3 | `keyword_generator.py` | TTS anchor + variants |
+| 4 | `convert_anchor_knnvc.py` | kNN-VC anchor (recommended) |
+| 5 | `cohort_builder.py` | `cohort_<kw>*.npz` |
+| 6 | `calibrate.py` | `*_calibration*.json` |
+| 7 | `detector.py` | `logs/detections_<kw>.json` |
+| 8 | `validate_detection.py` | P / R / F1 vs transcripts |
 
-- **Feature Extractor (Backbone):** `facebook/wav2vec2-base` (frozen), a
-  pre-trained self-supervised speech model that turns raw audio into robust
-  acoustic features.
-- **Metric Layer (Projection Head):** a trained linear projection head that
-  compresses the 768-dimensional wav2vec2 output into a 256-dimensional
-  L2-normalized embedding space.
-- **Loss Function:** $\text{TripletMarginLoss}(\text{margin}=1.0)$, trained
-  on an anchor word, a positive sample (the same word, different speaker),
-  and a negative sample (a different word), pulling same-word embeddings
-  together and pushing different-word embeddings apart:
+## Model Training (Offline, AWS)
 
-$$
-\mathcal{L} = \max\big(0,\ d(a, p) - d(a, n) + \text{margin}\big)
-$$
+Three training generations live under `training/`:
 
-- **Training data:** `MLCommons/ml_spoken_words`, 5.1 million short human
-  speech clips, on AWS `g6.xlarge` (NVIDIA L4) with a 500 GB EBS volume for
-  dataset caching. The Phase-1 baseline converged to a validation loss of
-  ~0.29 over 50 epochs. A Phase-2 run added a gradient-reversal
-  domain-adversarial loss to reduce TTS-vs-real sensitivity in the backbone
-  itself (`training/train_siamese_v2.py`); see `Reports/SIAMESE_PROGRESS_REPORT.md`
-  for that experiment's outcome.
+| Phase | Script | What it trains | Checkpoint |
+|---|---|---|---|
+| 1 | `train_siamese_v1.py` | wav2vec2-base (frozen) + linear projection head, triplet loss on MSWC | `siamese_v1_best.pth` |
+| 2 | `train_siamese_v2.py` | Same backbone + GRL domain adversary on the head (did not fix ranking inversions) | `siamese_v2_best.pth` |
+| 3 | `train_siamese_v3.py` | **Attentive pooling head** on frozen WavLM L10, sub-center ArcFace, phonetic-confusable batches | `siamese_v3_best.pth` |
+
+Launch helpers: `deploy_phase1.ps1`, `deploy_phase2.ps1`, `deploy_phase3.ps1`.
 
 ## Usage Guide
 
-Run from the project root. Most scripts default `--keyword` to
-`selected_keyword.txt` if you omit it.
+Run from the project root. Pass `--keyword` explicitly (or create
+`selected_keyword.txt` in the project root).
 
-1. **Download & chunk a live stream** (dedupes on content hash, not just the
-   segment URL, since YouTube re-signs segment URLs on every poll):
+```powershell
+cd Siamese_VMS_Project
+$env:SIAMESE_BACKEND = "wavlm-trained"
+$env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
+```
+
+1. **Download stream chunks** (content-hash dedup):
    ```bash
    python pipeline/downloader.py
    ```
-2. **Get ground-truth transcripts** for every chunk (used later for
-   validation and, optionally, to auto-pick a keyword):
+2. **Transcribe chunks** (ground truth for validation + kNN-VC exclusion):
    ```bash
    python pipeline/transcribe_chunks.py
    ```
-3. **Build the multi-voice TTS prototype anchor:**
+3. **TTS prototype anchor:**
    ```bash
-   python pipeline/keyword_generator.py --keyword washington
+   python pipeline/keyword_generator.py --keyword cloudy
    ```
-4. **Convert the anchor into the stream's own voice** (recommended: this
-   is what closes the domain gap):
+4. **kNN-VC anchor conversion** (closes the domain gap):
    ```bash
-   python pipeline/convert_anchor_knnvc.py --keyword washington
+   python pipeline/convert_anchor_knnvc.py --keyword cloudy
    ```
-5. **Build the AS-norm impostor cohort:**
+5. **Impostor cohort:**
    ```bash
-   python pipeline/cohort_builder.py --keyword washington
+   python pipeline/cohort_builder.py --keyword cloudy
    ```
-6. **Calibrate the per-keyword detection threshold:**
+6. **Calibrate threshold** (aligned detector protocol, keyword-free negatives):
    ```bash
-   python pipeline/calibrate.py --keyword washington
+   python pipeline/calibrate.py --keyword cloudy --fa-percentile 100 --negatives 40000
    ```
-7. **Run detection:**
+7. **Detect:**
    ```bash
-   python pipeline/detector.py --keyword washington
+   python pipeline/detector.py --keyword cloudy
    ```
-8. **Validate against Whisper ground truth** (prints precision/recall/F1):
+8. **Validate:**
    ```bash
-   python pipeline/validate_detection.py --keyword washington
+   python pipeline/validate_detection.py --keyword cloudy
    ```
 
-For the full experimental history (every keyword tried, every failure mode
-found, and the reasoning behind each fix), see
-[Reports/EXPERIMENT_LOG.md](Reports/EXPERIMENT_LOG.md) and
-[Reports/SIAMESE_PROGRESS_REPORT.md](Reports/SIAMESE_PROGRESS_REPORT.md).
+## Related Approaches in This Repo
+
+| Folder | Method |
+|---|---|
+| `Correlation_VMS_Project/` | Original TTS + cross-correlation baseline |
+| `PhonMatchNet_VMS_Project/` | G2P open-vocabulary phoneme matching (no audio anchor) |
+| **Siamese_VMS_Project/** | This project — Siamese embedding + kNN-VC + WavLM detector |
