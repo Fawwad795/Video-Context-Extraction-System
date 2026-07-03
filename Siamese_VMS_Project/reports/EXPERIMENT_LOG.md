@@ -46,6 +46,7 @@ run (logged, not silently dropped).
 | **2026-07-02** | **4-keyword micro-avg** | **D** | kNN-VC + phoneme verification | full cascade | — | 7/1/1 (40 chunk-decisions) | **P 0.875 / R 0.875 / F1 = 0.875** (macro-avg F1 = 0.915) | first full validation run on a duplicate-free chunk set - see "Set D validation" below |
 | 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm (frozen L10 mean-pool), detector alone** | per-keyword calibrated | 1/0/8 (50 chunk-decisions) | **P 1.00 / R 0.11 / F1 = 0.20** — only russia crossed its threshold; every other TP in the d39ff93 run arrived via verifier rescue | `logs/backup_setD_wavlm10/detections_*_unverified.json` |
 | 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** — all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03), no verifier — see "Step 3" below | `logs/detections_*.json` (current) |
+| 2026-07-03 | outbreaks | D | kNN-VC converted | wavlm-trained, detector alone | 1.729 (aligned-p100) | 1/0/1 | P 1.00 / R 0.50 / F1 = 0.67 — live_7 direct hit (+1.74); live_2 FN is a chunk-boundary case (keyword ends 30 ms before chunk end, no fully-contained window) — see "Sixth keyword" under Step 3 | `logs/detections_outbreaks.json` |
 
 Note: `detector.py` labels every `.npz` anchor "TTS prototype centroid" in the
 JSON; for the 2026-07-02 rows the anchor was actually the kNN-VC-converted
@@ -181,7 +182,41 @@ per-keyword data-fitted on keyword-free deployment audio (no manual
 tuning, but max-statistics on ~2.4k–30k windows are noisier than
 percentiles — watch FA rate on longer streams). The verifier stays in the
 pipeline as an optional precision stage; it is no longer load-bearing for
-recall on Set D.
+recall on Set D. Reproducibility: calibrate (seed 777) + cohort (seed 123)
+are deterministic — a from-scratch scotland re-run reproduced threshold
+0.622 and the identical 3 detections.
+
+### Sixth keyword, "outbreaks" (2026-07-03): the chunk-boundary failure mode
+
+Fresh keyword run end-to-end under the Step 3 protocol (keyword_generator →
+convert_anchor_knnvc → cohort → aligned-p100 calibrate → detector), truth =
+2 of 10 chunks (live_2, live_7). Detector-only: **P 1.00 / R 0.50 / F1
+0.67** (threshold 1.729), `logs/detections_outbreaks.json`.
+
+- live_7 ("...cloudy with outbreaks of rain...") — direct hit, 3.47
+  (+1.74 margin, 41 windows above threshold, cos 0.702).
+- live_2 ("...will see more prolonged outbreaks.") — **FN at 1.14**.
+  Whisper word timing places the keyword at 4.54–4.98 s of a 5.01 s
+  chunk: it ends 30 ms before the chunk boundary, so no sliding window
+  can bracket it — a full-scale (0.67 s) window starting at word onset
+  would run past the chunk end. The best physical window (4.36 s, scale
+  0.8) clips the final /s/ and includes the tail of "prolonged"
+  (cos 0.478 vs 0.702 for the clean hit).
+
+This is an alignment/boundary case, NOT calibration: live_0's hottest
+keyword-free window scores 1.73 > live_2's 1.14, so no threshold yields
+2TP/0FP (p99.5 = 1.151 still misses by 0.011; p99 = 0.861 catches live_2
+but admits 2 FPs — F1 unchanged at 0.67, and the FA-bounded-by-
+construction property of the p100 threshold is lost). Detector/calibration
+parameter changes were evaluated and rejected on those tradeoffs.
+Structural fixes, in preference order: (1) overlap consecutive chunks by
+~1 s in downloader.py / the platform live loop so no word can straddle or
+abut a boundary (needs a dedup rule for detections in the overlap);
+(2) rely on the existing verifier candidate rescue — live_2's 4.36 s
+window is that chunk's TOP candidate, exactly the case the rescue path
+was built for. The Step 3 claim stands with this boundary condition
+documented: direct threshold detection holds for words with at least one
+fully-contained window; edge-of-chunk words still need overlap or rescue.
 
 ## Key findings
 

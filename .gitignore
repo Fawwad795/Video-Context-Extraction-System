@@ -48,7 +48,12 @@ VMS/
 Siamese_VMS_Project/keywords/
 Siamese_VMS_Project/logs/detections_*.json
 Siamese_VMS_Project/logs/timestamps_*.txt
+Siamese_VMS_Project/logs/ab_*
+Siamese_VMS_Project/logs/backup_*/
+Siamese_VMS_Project/checkpoints/siamese_v3_final.pth
 # audios/transcripts.txt and logs/archive/ are curated write-up evidence - tracked
+# (ab_* dumps, backup_*/ detections snapshots, and the non-best v3 checkpoint
+#  are local evidence; siamese_v3_best.pth is the tracked deliverable)
 
 # --- Disposable experiment artifacts (local only) ---
 Siamese_VMS_Project/audios_prev/
