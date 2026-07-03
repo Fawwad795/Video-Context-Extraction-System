@@ -87,6 +87,43 @@ def pool_segment(frames):
     return frames.mean(axis=0).astype(np.float32)
 
 
+class WavLMEmbedder:
+    """Drop-in replacement for SiameseAudioModel: frozen SSL mid layer.
+
+    Exposes the same get_embedding(batch, sr) interface that
+    scoring.embed_batch() expects, plus a frames() fast path so the
+    detector can embed all sliding windows of a chunk from a single
+    forward pass (mean-pooled frame features, cumsum trick).
+    """
+
+    is_frame_backend = True
+
+    def __init__(self, model_name="microsoft/wavlm-base-plus", layer=10):
+        self.backend = FrameBackend(model_name)
+        self.layer = int(layer)
+        print(f"Embedding backend: {model_name} layer {self.layer} (mean-pooled)")
+
+    @torch.no_grad()
+    def get_embedding(self, audio_list, sampling_rate=SAMPLE_RATE):
+        """List of same-length float32 arrays -> [B, D] torch tensor."""
+        inputs = self.backend.fe(audio_list, sampling_rate=sampling_rate,
+                                 return_tensors="pt", padding=True)
+        inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
+        out = self.backend.model(**inputs, output_hidden_states=True)
+        return out.hidden_states[self.layer].mean(dim=1)
+
+    def frames(self, audio):
+        """Full-waveform frame features [T, D] at this backend's layer."""
+        return self.backend.frames(audio, [self.layer])[self.layer]
+
+    # no-op compatibility with load_siamese_model() call sites
+    def eval(self):
+        return self
+
+    def to(self, device):
+        return self
+
+
 class BaselineHeadEmbedder:
     """Production Siamese embedding under the frame-pooling protocol.
 

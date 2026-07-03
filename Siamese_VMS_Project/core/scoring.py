@@ -43,14 +43,52 @@ AUDIO_DIR = os.environ.get("SIAMESE_AUDIO_DIR", os.path.join(PROJECT_ROOT, "audi
 SAMPLE_RATE = 16000
 DEFAULT_TOP_K = 50
 
+# --- Embedding backend selection (siamese/optimizations) ---
+# SIAMESE_BACKEND=wavlm switches the whole pipeline (anchor conversion,
+# cohort, calibration, detection) to mean-pooled mid-layer features of a
+# frozen SSL backbone. Validated on Set D (see pipeline/eval_scoring_ab.py):
+# wavlm-base-plus layer 10 ranks all 4 keywords perfectly (AP 1.0) where the
+# trained wav2vec2-base+head baseline scores AP 0.586.
+BACKEND = os.environ.get("SIAMESE_BACKEND", "baseline").strip().lower()
+BACKBONE = os.environ.get("SIAMESE_BACKBONE", "microsoft/wavlm-base-plus")
+BACKBONE_LAYER = int(os.environ.get("SIAMESE_LAYER", "10"))
+
+
+def artifact_suffix():
+    """Suffix isolating backend-specific artifacts (anchors/cohorts/calibration).
+
+    Baseline artifacts keep their historical names; alternative backends get
+    e.g. _wavlm10 so A/B runs never clobber each other.
+    """
+    if BACKEND == "baseline":
+        return ""
+    short = BACKBONE.split("/")[-1].replace("-base-plus", "").replace("-", "")
+    return f"_{short}{BACKBONE_LAYER}"
+
+
+def anchor_path(keyword):
+    return os.path.join(PROJECT_ROOT, "keywords",
+                        f"{keyword}_anchor{artifact_suffix()}.npz")
+
+
+def calibration_path(keyword):
+    return os.path.join(PROJECT_ROOT, "keywords",
+                        f"{keyword}_calibration{artifact_suffix()}.json")
+
 
 def cohort_path(keyword):
     # Per-keyword: cohort windows are sampled at the keyword's duration and
     # distractor words exclude the keyword, so cohorts are not interchangeable.
-    return os.path.join(PROJECT_ROOT, "keywords", f"cohort_{keyword}.npz")
+    return os.path.join(PROJECT_ROOT, "keywords",
+                        f"cohort_{keyword}{artifact_suffix()}.npz")
 
 
 def load_siamese_model():
+    if BACKEND == "wavlm":
+        from embedders import WavLMEmbedder
+        return WavLMEmbedder(BACKBONE, BACKBONE_LAYER)
+    if BACKEND != "baseline":
+        raise ValueError(f"Unknown SIAMESE_BACKEND: {BACKEND!r}")
     model = SiameseAudioModel()
     if os.path.exists(WEIGHTS_PATH):
         print(f"Loading checkpoint: {WEIGHTS_PATH}")

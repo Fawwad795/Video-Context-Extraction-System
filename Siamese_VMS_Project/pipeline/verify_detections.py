@@ -152,8 +152,22 @@ def main():
                     help="negative-score percentile used when calibrating tau")
     ap.add_argument("--negatives", type=int, default=40)
     ap.add_argument("--max-refs", type=int, default=8, help="reference clips per variant dir")
+    ap.add_argument("--probe-ms", type=int, default=100,
+                    help="also decode candidate windows shifted by +/- this many "
+                         "ms (in 50ms steps) and keep the best phone-sim. "
+                         "Contextualized frame backends (SIAMESE_BACKEND=wavlm) "
+                         "localize the embedding peak less precisely than the "
+                         "word boundary; a short (~4-phone) keyword needs "
+                         "~+/-25ms alignment to decode cleanly. 0 disables.")
     ap.add_argument("--seed", type=int, default=777)
     args = ap.parse_args()
+
+    probe_offsets = [0.0]
+    if args.probe_ms > 0:
+        step = 0.05
+        k = int(round(args.probe_ms / 1000 / step))
+        probe_offsets = sorted({round(i * step, 3) for i in range(-k, k + 1)},
+                               key=abs)
 
     keyword = args.keyword
     if keyword is None:
@@ -193,10 +207,21 @@ def main():
     tau = args.tau
     if tau is None:
         rng = np.random.default_rng(args.seed)
+        # Negatives must see the same max-over-probes statistic as the
+        # candidates, otherwise tau is calibrated against a weaker score.
+        pad = int(max(probe_offsets) * SAMPLE_RATE) if len(probe_offsets) > 1 else 0
         win = int(window_seconds * SAMPLE_RATE)
-        print(f"\nCalibrating tau on {args.negatives} random stream windows...")
-        neg_scores = [best_similarity(refs, decode_phones(processor, model, torch, w))
-                      for w in sample_stream_windows(win, args.negatives, rng)]
+        print(f"\nCalibrating tau on {args.negatives} random stream windows "
+              f"(probe +/-{args.probe_ms}ms)...")
+        neg_scores = []
+        for w in sample_stream_windows(win + 2 * pad, args.negatives, rng):
+            best = 0.0
+            for off in probe_offsets:
+                s = pad + int(off * SAMPLE_RATE)
+                seg = w[max(0, s):max(0, s) + win]
+                best = max(best, best_similarity(
+                    refs, decode_phones(processor, model, torch, seg)))
+            neg_scores.append(best)
         neg_scores = np.array(neg_scores)
         neg_p = float(np.percentile(neg_scores, args.fa_percentile))
         print(f"negative phone-similarity: mean={neg_scores.mean():.3f} "
@@ -232,10 +257,16 @@ def main():
         best_sim_chunk = 0.0
         for k, det in enumerate(dets):
             ws = window_seconds * det.get("scale", 1.0)
-            s = max(0, int((det["time"] - CONTEXT_PAD_S) * SAMPLE_RATE))
-            e = min(len(y), int((det["time"] + ws + CONTEXT_PAD_S) * SAMPLE_RATE))
-            phones = decode_phones(processor, model, torch, y[s:e].astype(np.float32))
-            sim = best_similarity(refs, phones)
+            sim = 0.0
+            for off in probe_offsets:
+                t0 = det["time"] + off
+                s = max(0, int((t0 - CONTEXT_PAD_S) * SAMPLE_RATE))
+                e = min(len(y), int((t0 + ws + CONTEXT_PAD_S) * SAMPLE_RATE))
+                phones = decode_phones(processor, model, torch,
+                                       y[s:e].astype(np.float32))
+                sim = max(sim, best_similarity(refs, phones))
+                if sim >= 1.0:
+                    break
             det["phone_sim"] = round(sim, 3)
             det["rescued"] = k >= n_dets
             best_sim_chunk = max(best_sim_chunk, sim)

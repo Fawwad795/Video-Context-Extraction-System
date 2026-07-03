@@ -24,8 +24,8 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
-from scoring import (PROJECT_ROOT, SAMPLE_RATE, cohort_path, embed_batch,
-                     load_siamese_model, sample_stream_windows)
+from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, cohort_path,
+                     embed_batch, load_siamese_model, sample_stream_windows)
 
 DISTRACTOR_WORDS = [
     "people", "because", "through", "before", "little", "world", "right",
@@ -55,9 +55,9 @@ def main():
 
     # Window length comes from the anchor so cohort windows match what the
     # detector will embed; fall back to 0.7s if no anchor exists yet.
-    anchor_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
-    if keyword and os.path.exists(anchor_path):
-        window_samples = int(np.load(anchor_path)["window_samples"])
+    anchor_npz = anchor_path(keyword) if keyword else ""
+    if keyword and os.path.exists(anchor_npz):
+        window_samples = int(np.load(anchor_npz)["window_samples"])
     else:
         window_samples = int(0.7 * SAMPLE_RATE)
         print("No anchor found - using default 0.70s cohort window.")

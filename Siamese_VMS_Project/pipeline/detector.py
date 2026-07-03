@@ -26,7 +26,8 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
-from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, asnorm_windows,
+from scoring import (BACKEND, DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE,
+                     anchor_path, asnorm_windows, calibration_path,
                      embed_batch, l2_normalize, list_chunk_audios,
                      load_cohort, load_siamese_model)
 
@@ -41,20 +42,21 @@ def load_anchor(keyword, anchor_audio, model):
         emb = embed_batch(model, [y.astype(np.float32)])[0]
         return emb, len(y), f"audio file {os.path.basename(anchor_audio)}"
 
-    npz_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
+    npz_path = anchor_path(keyword)
     if not os.path.exists(npz_path):
         raise FileNotFoundError(
-            f"{npz_path} not found - run keyword_generator.py first "
+            f"{npz_path} not found - run keyword_generator.py / "
+            f"convert_anchor_knnvc.py for this backend first "
             f"(or pass --anchor-audio <wav/m4a> to use a recorded anchor).")
     data = np.load(npz_path)
     return (l2_normalize(data["centroid"]), int(data["window_samples"]),
-            "TTS prototype centroid")
+            f"prototype centroid ({os.path.basename(npz_path)})")
 
 
 def resolve_threshold(keyword, override):
     if override is not None:
         return float(override), "command-line override"
-    calib_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_calibration.json")
+    calib_path = calibration_path(keyword)
     if os.path.exists(calib_path):
         with open(calib_path) as f:
             calib = json.load(f)
@@ -93,6 +95,18 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
     results = {"keyword": keyword, "threshold": threshold, "anchor": anchor_desc,
                "window_seconds": window_samples / SAMPLE_RATE, "chunks": []}
 
+    # Frame backends (SIAMESE_BACKEND=wavlm) embed a chunk with ONE forward
+    # pass and pool sliding windows from the contextualized frame features -
+    # this is the protocol validated by eval_scoring_ab.py and is ~2 orders
+    # of magnitude faster than embedding each window separately.
+    frame_mode = getattr(model, "is_frame_backend", False)
+    if frame_mode:
+        from embedders import FRAME_STRIDE, pooled_windows, samples_to_frames
+        hop_frames = max(1, int(round(step_seconds * SAMPLE_RATE / FRAME_STRIDE)))
+        print(f"Frame backend: chunk-level forward, hop "
+              f"{hop_frames * FRAME_STRIDE * 1000 / SAMPLE_RATE:.0f}ms "
+              f"({hop_frames} frames)")
+
     for audio_file in audio_files:
         filename = os.path.basename(audio_file)
         y, _ = librosa.load(audio_file, sr=SAMPLE_RATE)
@@ -100,13 +114,22 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
         # Multi-scale scan: a human saying the keyword faster/slower than the
         # TTS anchor still gets a window that fits the spoken duration.
         all_scores, all_raw, all_times, all_scales, n_windows = [], [], [], [], 0
+        chunk_frames = model.frames(y.astype(np.float32)) if frame_mode else None
         for scale in scales:
             ws = max(int(window_samples * scale), int(0.15 * SAMPLE_RATE))
-            starts = list(range(0, len(y) - ws + 1, step_samples))
-            if not starts:
-                continue
-            windows = [y[s:s + ws].astype(np.float32) for s in starts]
-            embs = embed_batch(model, windows, batch_size=batch_size)
+            if frame_mode:
+                wf = samples_to_frames(ws)
+                embs, start_frames = pooled_windows(chunk_frames, wf, hop_frames)
+                if len(embs) == 0:
+                    continue
+                embs = l2_normalize(embs)
+                starts = start_frames * FRAME_STRIDE
+            else:
+                starts = list(range(0, len(y) - ws + 1, step_samples))
+                if not starts:
+                    continue
+                windows = [y[s:s + ws].astype(np.float32) for s in starts]
+                embs = embed_batch(model, windows, batch_size=batch_size)
             normed, raw = asnorm_windows(embs, anchor, cohort, top_k)
             all_scores.append(normed)
             all_raw.append(raw)

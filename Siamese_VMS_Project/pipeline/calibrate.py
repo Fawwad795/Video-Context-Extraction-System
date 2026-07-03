@@ -31,9 +31,10 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
-from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, asnorm_windows,
-                     embed_batch, l2_normalize, load_cohort,
-                     load_siamese_model, sample_stream_windows)
+from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
+                     asnorm_windows, calibration_path, embed_batch,
+                     l2_normalize, load_cohort, load_siamese_model,
+                     sample_stream_windows)
 
 
 def main():
@@ -54,11 +55,11 @@ def main():
             return
         keyword = open(kw_file).read().strip()
 
-    anchor_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
-    if not os.path.exists(anchor_path):
-        print(f"{anchor_path} not found - run keyword_generator.py first.")
+    anchor_npz = anchor_path(keyword)
+    if not os.path.exists(anchor_npz):
+        print(f"{anchor_npz} not found - run keyword_generator.py first.")
         return
-    data = np.load(anchor_path)
+    data = np.load(anchor_npz)
     centroid = l2_normalize(data["centroid"])
     positives = data["positives"]
     window_samples = int(data["window_samples"])
@@ -112,7 +113,7 @@ def main():
         "n_neg": int(len(neg_scores)),
         "calibrated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    out_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_calibration.json")
+    out_path = calibration_path(keyword)
     with open(out_path, "w") as f:
         json.dump(out, f, indent=2)
     print(f"\nCalibration saved: {out_path}")

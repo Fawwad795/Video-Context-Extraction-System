@@ -41,8 +41,9 @@ import torch
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
-from scoring import (PROJECT_ROOT, SAMPLE_RATE, embed_batch, l2_normalize,
-                     list_chunk_audios, load_siamese_model)
+from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, artifact_suffix,
+                     embed_batch, l2_normalize, list_chunk_audios,
+                     load_siamese_model)
 
 MIN_CLIP_SECONDS = 0.15
 
@@ -109,22 +110,31 @@ def main():
         print(f"No TTS variants in {variants_dir} - run keyword_generator.py first.")
         return
 
-    ref_wavs = keyword_free_chunks(keyword)
-    if not ref_wavs:
-        print("No keyword-free reference chunks available. Aborting.")
-        return
-    ref_seconds = sum(librosa.get_duration(path=f) for f in ref_wavs)
-    print(f"Reference pool: {len(ref_wavs)} chunks, {ref_seconds:.0f}s of stream audio")
-
-    print("Loading kNN-VC (WavLM-Large + prematched HiFi-GAN) via torch.hub...")
-    knn_vc = torch.hub.load("bshall/knn-vc", "knn_vc", prematched=True,
-                            trust_repo=True, pretrained=True, device="cpu")
-    ref_tensors = [load_wav_tensor(f) for f in ref_wavs]
-    matching_set = knn_vc.get_matching_set(ref_tensors)
-    print(f"Matching set: {matching_set.shape[0]} WavLM frames")
-
     out_dir = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_variants_knnvc")
     os.makedirs(out_dir, exist_ok=True)
+
+    # Lazy kNN-VC load: if every converted clip is already cached on disk we
+    # never need the model (validated safe 2026-07-03: cached clips are
+    # byte-identical, ~5 min -> 30 s).
+    need_convert = [s for s in src_wavs
+                    if not os.path.exists(os.path.join(out_dir, os.path.basename(s)))]
+    knn_vc = matching_set = None
+    if need_convert:
+        ref_wavs = keyword_free_chunks(keyword)
+        if not ref_wavs:
+            print("No keyword-free reference chunks available. Aborting.")
+            return
+        ref_seconds = sum(librosa.get_duration(path=f) for f in ref_wavs)
+        print(f"Reference pool: {len(ref_wavs)} chunks, {ref_seconds:.0f}s of stream audio")
+        print("Loading kNN-VC (WavLM-Large + prematched HiFi-GAN) via torch.hub...")
+        knn_vc = torch.hub.load("bshall/knn-vc", "knn_vc", prematched=True,
+                                trust_repo=True, pretrained=True, device="cpu")
+        ref_tensors = [load_wav_tensor(f) for f in ref_wavs]
+        matching_set = knn_vc.get_matching_set(ref_tensors)
+        print(f"Matching set: {matching_set.shape[0]} WavLM frames")
+    else:
+        print(f"All {len(src_wavs)} converted clips cached in {out_dir} - "
+              f"skipping kNN-VC load.")
 
     clips = []  # (name, trimmed converted audio)
     for i, src in enumerate(src_wavs):
@@ -178,18 +188,19 @@ def main():
     print(f"Centroid cohesion: cos mean={cos_to_centroid.mean():.3f} "
           f"min={cos_to_centroid.min():.3f}")
 
-    anchor_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
-    backup_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor_tts.npz")
-    if os.path.exists(anchor_path) and not os.path.exists(backup_path):
-        shutil.copy2(anchor_path, backup_path)
+    out_anchor = anchor_path(keyword)
+    backup_path = os.path.join(
+        PROJECT_ROOT, "keywords", f"{keyword}_anchor_tts{artifact_suffix()}.npz")
+    if os.path.exists(out_anchor) and not os.path.exists(backup_path):
+        shutil.copy2(out_anchor, backup_path)
         print(f"Baseline TTS anchor backed up: {backup_path}")
 
-    np.savez(anchor_path,
+    np.savez(out_anchor,
              centroid=centroid.astype(np.float32),
              positives=positives.astype(np.float32),
              window_samples=np.int64(window_samples),
              keyword=np.str_(keyword))
-    print(f"kNN-VC anchor saved: {anchor_path}")
+    print(f"kNN-VC anchor saved: {out_anchor}")
     print(f"  clips used: {len(clips)} ({len(centroid_audio)} centroid, "
           f"{len(positive_audio)} held out)  |  window: "
           f"{window_samples / SAMPLE_RATE:.2f}s")
