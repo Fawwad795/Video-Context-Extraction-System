@@ -116,6 +116,71 @@ def asnorm_windows(window_embs, anchor, cohort, top_k=DEFAULT_TOP_K):
     return normed, raw
 
 
+def fit_whitener(embeddings, eps=0.1):
+    """Fit a soft-ZCA whitening transform on cohort embeddings.
+
+    The frozen-backbone embedding space is anisotropic (random in-domain
+    pairs score cos 0.85-0.95), which compresses the score range and buries
+    keyword evidence in a constant offset. Whitening the space with
+    statistics from the in-domain impostor cohort re-centers and re-rounds
+    it (Su et al. 2021; soft variant per Soft-ZCA, 2024):
+
+        x_w = U diag(1/sqrt(s + eps*mean(s))) U^T (x - mu)
+
+    eps is a relative shrinkage on the eigenvalues so near-null directions
+    are not blown up. Returns (mu [D], W [D, D]).
+    """
+    X = np.asarray(embeddings, dtype=np.float64)
+    mu = X.mean(axis=0)
+    Xc = X - mu
+    cov = (Xc.T @ Xc) / max(1, len(X) - 1)
+    s, U = np.linalg.eigh(cov)
+    s = np.maximum(s, 0.0)
+    scale = 1.0 / np.sqrt(s + eps * s.mean() + 1e-12)
+    W = (U * scale) @ U.T
+    return mu.astype(np.float32), W.astype(np.float32)
+
+
+def whiten(x, mu, W, renorm=True):
+    """Apply a fitted whitening transform; optionally L2-renormalize."""
+    out = (np.atleast_2d(x) - mu) @ W
+    if renorm:
+        out = l2_normalize(out)
+    return out.astype(np.float32)
+
+
+def max_template_scores(window_embs, template_embs):
+    """Max-of-k multi-template cosine: [B, D] x [K, D] -> [B].
+
+    Scores each window against every anchor template and keeps the best,
+    instead of collapsing the templates into one centroid. Standard in
+    QbE-STD; preserves the anchor set's variance structure.
+    """
+    return (np.atleast_2d(window_embs) @ np.atleast_2d(template_embs).T).max(axis=1)
+
+
+def fit_llr_scorer(positive_embs, cohort_embs, shrink=0.5):
+    """Diagonal-Gaussian likelihood-ratio scorer (PLDA-lite).
+
+    s(x) = log N(x; mu_p, var_p) - log N(x; mu_c, var_c), with the positive
+    variance shrunk toward the cohort variance (few positive samples).
+    Fit and score in the SAME (ideally whitened) space.
+    """
+    P = np.asarray(positive_embs, dtype=np.float64)
+    C = np.asarray(cohort_embs, dtype=np.float64)
+    mu_p, mu_c = P.mean(axis=0), C.mean(axis=0)
+    var_c = C.var(axis=0) + 1e-6
+    var_p = shrink * (P.var(axis=0) + 1e-6) + (1.0 - shrink) * var_c
+
+    def score(x):
+        x = np.atleast_2d(np.asarray(x, dtype=np.float64))
+        ll_p = -0.5 * (((x - mu_p) ** 2) / var_p + np.log(var_p)).sum(axis=1)
+        ll_c = -0.5 * (((x - mu_c) ** 2) / var_c + np.log(var_c)).sum(axis=1)
+        return (ll_p - ll_c).astype(np.float32)
+
+    return score
+
+
 def load_cohort(keyword):
     path = cohort_path(keyword)
     if not os.path.exists(path):
