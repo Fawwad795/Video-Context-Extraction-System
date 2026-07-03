@@ -119,7 +119,14 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
             ws = max(int(window_samples * scale), int(0.15 * SAMPLE_RATE))
             if frame_mode:
                 wf = samples_to_frames(ws)
-                embs, start_frames = pooled_windows(chunk_frames, wf, hop_frames)
+                # wavlm-trained pools windows with its attentive head;
+                # plain wavlm falls back to the cumsum frame mean.
+                if hasattr(model, "pool_windows"):
+                    embs, start_frames = model.pool_windows(
+                        chunk_frames, wf, hop_frames)
+                else:
+                    embs, start_frames = pooled_windows(
+                        chunk_frames, wf, hop_frames)
                 if len(embs) == 0:
                     continue
                 embs = l2_normalize(embs)

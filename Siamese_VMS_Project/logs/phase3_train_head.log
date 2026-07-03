@@ -1,0 +1,59 @@
+Phase-3 attentive-head training on cuda
+CachedWordDataset: 1000 classes, 34790 clips (backbone microsoft/wavlm-base-plus L10).
+Confusables from g2p_en phonemes (1000 words).
+Eval: 150 zero-shot words.
+Epoch 0 (identity init == wavlm-L10 mean pool): AUC 0.6373  pos-cos 0.388  neg-cos 0.296
+--- Epoch 1: arcface 14.9274 | AUC 0.5623 | pos-cos 0.101 neg-cos 0.098 (gap +0.003) ---
+--- Epoch 2: arcface 11.7647 | AUC 0.7897 | pos-cos 0.500 neg-cos 0.183 (gap +0.317) ---
+New best AUC 0.7897 -> siamese_v3_best.pth
+--- Epoch 3: arcface 7.8855 | AUC 0.8712 | pos-cos 0.444 neg-cos 0.053 (gap +0.391) ---
+New best AUC 0.8712 -> siamese_v3_best.pth
+--- Epoch 4: arcface 6.2082 | AUC 0.9188 | pos-cos 0.466 neg-cos 0.061 (gap +0.405) ---
+New best AUC 0.9188 -> siamese_v3_best.pth
+--- Epoch 5: arcface 5.2354 | AUC 0.9487 | pos-cos 0.463 neg-cos 0.034 (gap +0.428) ---
+New best AUC 0.9487 -> siamese_v3_best.pth
+--- Epoch 6: arcface 4.6570 | AUC 0.9563 | pos-cos 0.476 neg-cos 0.039 (gap +0.437) ---
+New best AUC 0.9563 -> siamese_v3_best.pth
+--- Epoch 7: arcface 4.1648 | AUC 0.9616 | pos-cos 0.486 neg-cos 0.044 (gap +0.442) ---
+New best AUC 0.9616 -> siamese_v3_best.pth
+--- Epoch 8: arcface 3.8551 | AUC 0.9662 | pos-cos 0.477 neg-cos 0.026 (gap +0.452) ---
+New best AUC 0.9662 -> siamese_v3_best.pth
+--- Epoch 9: arcface 3.6508 | AUC 0.9637 | pos-cos 0.473 neg-cos 0.023 (gap +0.450) ---
+--- Epoch 10: arcface 3.3143 | AUC 0.9666 | pos-cos 0.475 neg-cos 0.018 (gap +0.458) ---
+New best AUC 0.9666 -> siamese_v3_best.pth
+--- Epoch 11: arcface 3.1037 | AUC 0.9717 | pos-cos 0.485 neg-cos 0.028 (gap +0.457) ---
+New best AUC 0.9717 -> siamese_v3_best.pth
+--- Epoch 12: arcface 2.9309 | AUC 0.9679 | pos-cos 0.483 neg-cos 0.024 (gap +0.460) ---
+--- Epoch 13: arcface 2.8055 | AUC 0.9728 | pos-cos 0.480 neg-cos 0.013 (gap +0.468) ---
+New best AUC 0.9728 -> siamese_v3_best.pth
+--- Epoch 14: arcface 2.6937 | AUC 0.9711 | pos-cos 0.474 neg-cos 0.013 (gap +0.462) ---
+--- Epoch 15: arcface 2.4832 | AUC 0.9707 | pos-cos 0.479 neg-cos 0.014 (gap +0.464) ---
+--- Epoch 16: arcface 2.4133 | AUC 0.9717 | pos-cos 0.476 neg-cos 0.009 (gap +0.467) ---
+--- Epoch 17: arcface 2.2719 | AUC 0.9728 | pos-cos 0.476 neg-cos 0.008 (gap +0.468) ---
+New best AUC 0.9728 -> siamese_v3_best.pth
+--- Epoch 18: arcface 2.1951 | AUC 0.9729 | pos-cos 0.475 neg-cos 0.009 (gap +0.466) ---
+New best AUC 0.9729 -> siamese_v3_best.pth
+--- Epoch 19: arcface 2.1120 | AUC 0.9710 | pos-cos 0.477 neg-cos 0.010 (gap +0.467) ---
+--- Epoch 20: arcface 1.9882 | AUC 0.9718 | pos-cos 0.473 neg-cos 0.009 (gap +0.464) ---
+--- Epoch 21: arcface 1.8638 | AUC 0.9718 | pos-cos 0.473 neg-cos 0.010 (gap +0.463) ---
+--- Epoch 22: arcface 1.7956 | AUC 0.9710 | pos-cos 0.471 neg-cos 0.005 (gap +0.466) ---
+--- Epoch 23: arcface 1.7666 | AUC 0.9721 | pos-cos 0.470 neg-cos 0.007 (gap +0.463) ---
+--- Epoch 24: arcface 1.6091 | AUC 0.9744 | pos-cos 0.475 neg-cos 0.008 (gap +0.467) ---
+New best AUC 0.9744 -> siamese_v3_best.pth
+--- Epoch 25: arcface 1.5955 | AUC 0.9720 | pos-cos 0.472 neg-cos 0.010 (gap +0.462) ---
+--- Epoch 26: arcface 1.5438 | AUC 0.9731 | pos-cos 0.471 neg-cos 0.006 (gap +0.465) ---
+--- Epoch 27: arcface 1.4778 | AUC 0.9724 | pos-cos 0.468 neg-cos 0.005 (gap +0.463) ---
+--- Epoch 28: arcface 1.3828 | AUC 0.9734 | pos-cos 0.469 neg-cos 0.005 (gap +0.465) ---
+--- Epoch 29: arcface 1.2932 | AUC 0.9736 | pos-cos 0.468 neg-cos 0.003 (gap +0.465) ---
+--- Epoch 30: arcface 1.2703 | AUC 0.9742 | pos-cos 0.470 neg-cos 0.007 (gap +0.463) ---
+--- Epoch 31: arcface 1.2199 | AUC 0.9734 | pos-cos 0.469 neg-cos 0.006 (gap +0.463) ---
+--- Epoch 32: arcface 1.2052 | AUC 0.9741 | pos-cos 0.469 neg-cos 0.006 (gap +0.463) ---
+--- Epoch 33: arcface 1.2517 | AUC 0.9732 | pos-cos 0.468 neg-cos 0.004 (gap +0.463) ---
+--- Epoch 34: arcface 1.1687 | AUC 0.9740 | pos-cos 0.468 neg-cos 0.005 (gap +0.463) ---
+--- Epoch 35: arcface 1.1048 | AUC 0.9740 | pos-cos 0.468 neg-cos 0.004 (gap +0.464) ---
+--- Epoch 36: arcface 1.1127 | AUC 0.9743 | pos-cos 0.469 neg-cos 0.006 (gap +0.464) ---
+--- Epoch 37: arcface 1.1254 | AUC 0.9739 | pos-cos 0.468 neg-cos 0.005 (gap +0.464) ---
+--- Epoch 38: arcface 1.1490 | AUC 0.9739 | pos-cos 0.468 neg-cos 0.005 (gap +0.463) ---
+--- Epoch 39: arcface 1.1100 | AUC 0.9740 | pos-cos 0.469 neg-cos 0.005 (gap +0.464) ---
+--- Epoch 40: arcface 1.1306 | AUC 0.9740 | pos-cos 0.469 neg-cos 0.005 (gap +0.464) ---
+Done. Best AUC 0.9744 at epoch 24 (epoch-0 mean-pool baseline 0.6373).
