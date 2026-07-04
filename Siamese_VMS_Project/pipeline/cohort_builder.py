@@ -9,7 +9,9 @@ Two impostor sources:
      domain-matched negatives (speech, music, silence of the actual stream);
   2. TTS distractor words in random voices - same-domain competition for the
      TTS anchor, so the anchor's synthetic-domain advantage is normalized
-     away (skip with --no-tts).
+     away. Off by default: the pipeline ablation study (ablation_study/)
+     found no F1 gain from TTS distractors once the anchor goes through
+     kNN-VC conversion; enable with --tts if using a raw TTS anchor.
 
 Output: cohort.npz (embeddings [N, D])
 """
@@ -42,9 +44,13 @@ DISTRACTOR_WORDS = [
 def main():
     ap = argparse.ArgumentParser(description="Build the AS-norm impostor cohort.")
     ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
-    ap.add_argument("--stream-windows", type=int, default=200)
-    ap.add_argument("--tts-words", type=int, default=50)
-    ap.add_argument("--no-tts", action="store_true", help="skip TTS distractor words")
+    ap.add_argument("--stream-windows", type=int, default=50)
+    ap.add_argument("--tts-words", type=int, default=50,
+                    help="only used when --tts is passed")
+    ap.add_argument("--tts", action="store_true",
+                    help="synthesize TTS distractor words for the cohort "
+                         "(off by default; ablation study found no F1 gain)")
+    ap.add_argument("--no-tts", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--seed", type=int, default=123)
     args = ap.parse_args()
 
@@ -69,7 +75,7 @@ def main():
     n_stream = len(cohort_audio)
 
     n_tts = 0
-    if not args.no_tts:
+    if args.tts:
         from keyword_generator import load_tts, synthesize
         processor, tts_model, vocoder, xvectors = load_tts()
         words = [w for w in DISTRACTOR_WORDS if w != keyword][:args.tts_words]

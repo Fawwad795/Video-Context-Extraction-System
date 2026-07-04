@@ -115,9 +115,9 @@ $$
   per-window embedding).
 - **Threshold:** `pipeline/calibrate.py` — max score on keyword-free windows
   embedded through the **same detector protocol** (chunk context, all scales,
-  50 ms grid). Use `--fa-percentile 100 --negatives 40000` with the trained
-  head; negatives are drawn only from chunks that do not contain the keyword
-  (transcript token check).
+  50 ms grid). Defaults to `--fa-percentile 100 --negatives 40000` (the
+  trained-head operating point); negatives are drawn only from chunks that do
+  not contain the keyword (transcript token check).
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
@@ -144,6 +144,11 @@ Additional ad-hoc runs (same chunk set): `cloudy` (2 true chunks) F1 = 1.00;
 Full history, ablations, and failure analyses:
 [reports/EXPERIMENT_LOG.md](reports/EXPERIMENT_LOG.md),
 [reports/SIAMESE_PROGRESS_REPORT.md](reports/SIAMESE_PROGRESS_REPORT.md).
+
+Pipeline parameter defaults (voice count, holdout, stream-window count, TTS
+distractors) come from a one-at-a-time ablation over the same Set D keywords:
+`ablation_study/` — the `combined_best` config cuts wall time ~70% vs. the
+original search-time defaults with no F1 loss (`ablation_study/results/`).
 
 ## Configuration
 
@@ -226,7 +231,8 @@ $env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```bash
    python pipeline/transcribe_chunks.py
    ```
-3. **TTS prototype anchor:**
+3. **TTS prototype anchor** (7 canonical voices, holdout 4 — defaults tuned by
+   `ablation_study/`, no accuracy loss vs. the original 17-voice search):
    ```bash
    python pipeline/keyword_generator.py --keyword cloudy
    ```
@@ -234,13 +240,13 @@ $env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```bash
    python pipeline/convert_anchor_knnvc.py --keyword cloudy
    ```
-5. **Impostor cohort:**
+5. **Impostor cohort** (50 stream windows, TTS distractors off by default):
    ```bash
    python pipeline/cohort_builder.py --keyword cloudy
    ```
 6. **Calibrate threshold** (aligned detector protocol, keyword-free negatives):
    ```bash
-   python pipeline/calibrate.py --keyword cloudy --fa-percentile 100 --negatives 40000
+   python pipeline/calibrate.py --keyword cloudy
    ```
 7. **Detect:**
    ```bash

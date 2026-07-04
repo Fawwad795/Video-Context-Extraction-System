@@ -18,6 +18,17 @@ import glob
 import os
 import sys
 
+# Models/datasets this pipeline uses are fixed and already cached locally
+# (wavlm-base-plus[-sv], speecht5_tts/hifigan, cmu-arctic-xvectors, kNN-VC).
+# Default to offline mode so a flaky network doesn't break a cached-model
+# load on huggingface_hub's "check for updates" HTTP call. Must be set
+# before transformers/huggingface_hub is imported anywhere (below, via
+# siamese_model); override with HF_HUB_OFFLINE=0 / TRANSFORMERS_OFFLINE=0
+# to force a fresh download (e.g. first run with a new model).
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 import librosa
 import numpy as np
 import torch

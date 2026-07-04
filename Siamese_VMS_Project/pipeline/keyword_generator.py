@@ -93,10 +93,10 @@ def pick_voices(xvectors, n_random, n_blend, rng):
 def main():
     ap = argparse.ArgumentParser(description="Build a multi-voice TTS prototype anchor.")
     ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
-    ap.add_argument("--n-random", type=int, default=13, help="random utterance x-vectors")
-    ap.add_argument("--n-blend", type=int, default=10, help="cross-speaker x-vector blends")
+    ap.add_argument("--n-random", type=int, default=0, help="random utterance x-vectors")
+    ap.add_argument("--n-blend", type=int, default=0, help="cross-speaker x-vector blends")
     ap.add_argument("--n-augment", type=int, default=2, help="augmented copies per voice")
-    ap.add_argument("--holdout", type=int, default=6, help="voices held out as calibration positives")
+    ap.add_argument("--holdout", type=int, default=4, help="voices held out as calibration positives")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 

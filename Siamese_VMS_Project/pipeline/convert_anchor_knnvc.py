@@ -31,6 +31,7 @@ import glob
 import os
 import re
 import shutil
+import sys
 
 import librosa
 import numpy as np
@@ -90,8 +91,10 @@ def main():
     ap = argparse.ArgumentParser(description="kNN-VC domain-converted anchor.")
     ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
     ap.add_argument("--topk", type=int, default=4, help="kNN neighbours per frame")
-    ap.add_argument("--holdout", type=int, default=6,
-                    help="converted voices held out as calibration positives")
+    ap.add_argument("--holdout", type=int, default=4,
+                    help="converted voices held out as calibration positives "
+                         "(must match keyword_generator.py's --holdout - same "
+                         "voice pool feeds both)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -100,7 +103,7 @@ def main():
         kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
         if not os.path.exists(kw_file):
             print("No --keyword given and selected_keyword.txt not found.")
-            return
+            sys.exit(1)
         keyword = open(kw_file).read().strip()
     print(f"Building kNN-VC converted anchor for keyword: '{keyword}'")
 
@@ -108,7 +111,7 @@ def main():
     src_wavs = sorted(glob.glob(os.path.join(variants_dir, "*.wav")))
     if not src_wavs:
         print(f"No TTS variants in {variants_dir} - run keyword_generator.py first.")
-        return
+        sys.exit(1)
 
     out_dir = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_variants_knnvc")
     os.makedirs(out_dir, exist_ok=True)
@@ -123,7 +126,7 @@ def main():
         ref_wavs = keyword_free_chunks(keyword)
         if not ref_wavs:
             print("No keyword-free reference chunks available. Aborting.")
-            return
+            sys.exit(1)
         ref_seconds = sum(librosa.get_duration(path=f) for f in ref_wavs)
         print(f"Reference pool: {len(ref_wavs)} chunks, {ref_seconds:.0f}s of stream audio")
         print("Loading kNN-VC (WavLM-Large + prematched HiFi-GAN) via torch.hub...")
@@ -160,7 +163,7 @@ def main():
     clips = [(n, c) for n, c in clips if len(c) <= 1.8 * median_len]
     if len(clips) <= args.holdout + 2:
         print("Not enough usable converted clips. Aborting.")
-        return
+        sys.exit(1)
 
     window_samples = int(np.median([len(c) for _, c in clips]))
 

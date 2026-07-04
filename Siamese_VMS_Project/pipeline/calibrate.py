@@ -9,10 +9,11 @@ from two score distributions:
              deployment-domain audio that does not contain the keyword.
 
 The threshold is the empirical false-alarm operating point on the negative
-score distribution (default: 99.5th percentile, i.e. accept ~0.5% of
-negative windows). A percentile is used instead of mu + k*sigma because the
-AS-norm negative distribution is heavily left-skewed (silence/music windows
-produce a long negative tail), which makes sigma-based rules collapse.
+score distribution (default: 100th percentile, i.e. the max negative score -
+validated on Set D with 40000 negatives; see ablation_study/ for the sweep).
+A percentile is used instead of mu + k*sigma because the AS-norm negative
+distribution is heavily left-skewed (silence/music windows produce a long
+negative tail), which makes sigma-based rules collapse.
 
 Caveat: the recall estimate uses TTS positives, which are easier for a TTS
 centroid anchor than real human speech - treat it as an upper bound.
@@ -40,8 +41,8 @@ from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
 def main():
     ap = argparse.ArgumentParser(description="Calibrate the AS-norm detection threshold.")
     ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
-    ap.add_argument("--negatives", type=int, default=400)
-    ap.add_argument("--fa-percentile", type=float, default=99.5,
+    ap.add_argument("--negatives", type=int, default=40000)
+    ap.add_argument("--fa-percentile", type=float, default=100,
                     help="threshold = this percentile of the negative scores")
     ap.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     ap.add_argument("--seed", type=int, default=777)
