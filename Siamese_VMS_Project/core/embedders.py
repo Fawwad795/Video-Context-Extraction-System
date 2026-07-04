@@ -22,6 +22,8 @@ n_frames = floor((n_samples - 400) / 320) + 1 and frame t covers
 [320*t, 320*t + 400) samples.
 """
 
+import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -47,7 +49,7 @@ class FrameBackend:
 
     def __init__(self, model_name="microsoft/wavlm-base-plus"):
         from transformers import AutoFeatureExtractor, AutoModel
-        print(f"Loading frame backend: {model_name}")
+        print(f" > loading backbone {model_name} ...")
         self.name = model_name
         self.fe = AutoFeatureExtractor.from_pretrained(model_name)
         try:
@@ -202,8 +204,8 @@ class TrainedWavLMEmbedder:
         if weights_path:
             self.head, ckpt = load_head_checkpoint(weights_path)
             self.layer = int(ckpt.get("layer", layer))
-            print(f"Trained attentive head loaded from {weights_path} "
-                  f"(layer {self.layer})")
+            print(f" > trained attentive head: "
+                  f"{os.path.basename(weights_path)} (layer {self.layer})")
         else:
             self.head = AttentivePoolingHead()
             self.layer = int(layer)

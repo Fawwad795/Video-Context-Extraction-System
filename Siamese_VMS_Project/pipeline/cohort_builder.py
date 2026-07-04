@@ -18,6 +18,7 @@ Output: cohort.npz (embeddings [N, D])
 
 import argparse
 import os
+import time
 
 import librosa
 import numpy as np
@@ -26,6 +27,7 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
+import console as ui
 from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, cohort_path,
                      embed_batch, load_siamese_model, sample_stream_windows)
 
@@ -59,6 +61,9 @@ def main():
         kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
         keyword = open(kw_file).read().strip() if os.path.exists(kw_file) else ""
 
+    t0 = time.perf_counter()
+    ui.banner("AS-NORM IMPOSTOR COHORT", f"keyword: {keyword or '(none)'}")
+
     # Window length comes from the anchor so cohort windows match what the
     # detector will embed; fall back to 0.7s if no anchor exists yet.
     anchor_npz = anchor_path(keyword) if keyword else ""
@@ -66,11 +71,13 @@ def main():
         window_samples = int(np.load(anchor_npz)["window_samples"])
     else:
         window_samples = int(0.7 * SAMPLE_RATE)
-        print("No anchor found - using default 0.70s cohort window.")
+        ui.warn("no anchor found - using default 0.70s cohort window")
+    ui.kv("stream windows", args.stream_windows)
+    ui.kv("window length", f"{window_samples / SAMPLE_RATE:.2f}s")
+    ui.kv("TTS distractors", f"{args.tts_words} words" if args.tts else "off")
 
     rng = np.random.default_rng(args.seed)
-    print(f"Sampling {args.stream_windows} random stream windows "
-          f"({window_samples / SAMPLE_RATE:.2f}s each)...")
+    ui.step(f"sampling {args.stream_windows} random stream windows ...")
     cohort_audio = sample_stream_windows(window_samples, args.stream_windows, rng)
     n_stream = len(cohort_audio)
 
@@ -79,7 +86,7 @@ def main():
         from keyword_generator import load_tts, synthesize
         processor, tts_model, vocoder, xvectors = load_tts()
         words = [w for w in DISTRACTOR_WORDS if w != keyword][:args.tts_words]
-        print(f"Synthesizing {len(words)} TTS distractor words...")
+        ui.step(f"synthesizing {len(words)} TTS distractor words ...")
         import torch
         for i, word in enumerate(words):
             idx = int(rng.integers(0, len(xvectors)))
@@ -90,18 +97,18 @@ def main():
                 cohort_audio.append(trimmed.astype(np.float32))
                 n_tts += 1
             if (i + 1) % 10 == 0:
-                print(f"  {i + 1}/{len(words)} distractors done")
+                ui.item(f"{i + 1}/{len(words)} distractors done")
 
     model = load_siamese_model()
-    print(f"Embedding {len(cohort_audio)} cohort clips...")
+    ui.step(f"embedding {len(cohort_audio)} cohort clips ...")
     embeddings = embed_batch(model, cohort_audio)
 
     out_path = cohort_path(keyword)
     np.savez(out_path, embeddings=embeddings.astype(np.float32),
              n_stream=np.int64(n_stream), n_tts=np.int64(n_tts))
-    print(f"Cohort saved: {out_path} "
-          f"({n_stream} stream windows + {n_tts} TTS distractors)")
-    print("Next: python calibrate.py")
+    ui.ok(f"cohort: {n_stream} stream windows + {n_tts} TTS distractors")
+    ui.done(os.path.relpath(out_path, PROJECT_ROOT), t0)
+    ui.item("next: python pipeline/calibrate.py")
 
 
 if __name__ == "__main__":

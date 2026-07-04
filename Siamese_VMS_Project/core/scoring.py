@@ -29,6 +29,23 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
+# Keep the terminal readable: the pipeline's own status lines are the
+# output; library chatter (weight-loading progress bars, load reports,
+# advisory warnings, "using cached dataset" notices) is noise. All of
+# these must be set before transformers/datasets are first imported.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_DATASETS_VERBOSITY", "error")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+import warnings
+
+# torch's MultiheadAttention grumbles about our bool key_padding_mask +
+# float attn_mask combination on every attentive-head forward; harmless.
+warnings.filterwarnings(
+    "ignore", message=".*mismatched key_padding_mask and attn_mask.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
+
 import librosa
 import numpy as np
 import torch
@@ -41,6 +58,15 @@ if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
 from siamese_model import SiameseAudioModel
+
+# Belt and braces for the tqdm "Loading weights" bar and load-report tables:
+# some transformers versions only honor the runtime API, not the env vars.
+try:
+    from transformers.utils import logging as _hf_logging
+    _hf_logging.set_verbosity_error()
+    _hf_logging.disable_progress_bar()
+except Exception:
+    pass
 
 # Override with SIAMESE_PROJECT_ROOT to redirect all pipeline inputs/outputs
 # (keywords/, audios/, logs/) into a different data root - used by platform/

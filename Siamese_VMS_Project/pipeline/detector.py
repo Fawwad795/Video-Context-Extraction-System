@@ -17,6 +17,7 @@ Outputs: logs/timestamps_<keyword>.txt   (append, human-readable)
 import argparse
 import json
 import os
+import time
 from datetime import datetime
 
 import librosa
@@ -26,6 +27,7 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
+import console as ui
 from scoring import (BACKEND, DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE,
                      anchor_path, asnorm_windows, calibration_path,
                      embed_batch, l2_normalize, list_chunk_audios,
@@ -60,15 +62,17 @@ def resolve_threshold(keyword, override):
     if os.path.exists(calib_path):
         with open(calib_path) as f:
             calib = json.load(f)
-        return float(calib["threshold"]), f"calibrated ({calib_path})"
-    print(f"WARNING: no calibration found - using fallback threshold "
-          f"{DEFAULT_FALLBACK_THRESHOLD}. Run calibrate.py for a fitted one.")
+        return (float(calib["threshold"]),
+                f"calibrated: {os.path.basename(calib_path)}")
+    ui.warn(f"no calibration found - using fallback threshold "
+            f"{DEFAULT_FALLBACK_THRESHOLD}. Run calibrate.py for a fitted one.")
     return DEFAULT_FALLBACK_THRESHOLD, "uncalibrated fallback"
 
 
 def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
                   top_k=DEFAULT_TOP_K, batch_size=16, scales=(0.6, 0.8, 1.0)):
-    print("Initializing Siamese AS-norm detector...")
+    t0 = time.perf_counter()
+    ui.banner("AS-NORM DETECTOR", f"keyword: {keyword}")
     model = load_siamese_model()
     anchor, window_samples, anchor_desc = load_anchor(keyword, anchor_audio, model)
     cohort = load_cohort(keyword)
@@ -76,7 +80,7 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
 
     audio_files = list_chunk_audios()
     if not audio_files:
-        print("No live chunks found in audios/ - run downloader.py first.")
+        ui.fail("No live chunks found in audios/ - run downloader.py first.")
         return
 
     step_samples = max(1, int(SAMPLE_RATE * step_seconds))
@@ -84,12 +88,12 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
     json_path = os.path.join(PROJECT_ROOT, "logs", f"detections_{keyword}.json")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    print(f"\nKeyword: '{keyword}'  |  anchor: {anchor_desc}")
-    print(f"Window: {window_samples / SAMPLE_RATE:.2f}s x scales {list(scales)} "
-          f"(humans often speak faster than TTS)  step: {step_seconds * 1000:.0f}ms  "
-          f"cohort: {cohort.shape[0]}  top-k: {top_k}")
-    print(f"Threshold: {threshold:.3f} AS-norm units ({threshold_desc})")
-    print(f"Scanning {len(audio_files)} chunks...\n")
+    ui.kv("anchor", anchor_desc)
+    ui.kv("window", f"{window_samples / SAMPLE_RATE:.2f}s x scales "
+                    f"{list(scales)}, hop {step_seconds * 1000:.0f}ms")
+    ui.kv("cohort / top-k", f"{cohort.shape[0]} / {top_k}")
+    ui.kv("threshold", f"{threshold:.3f} AS-norm units ({threshold_desc})")
+    ui.step(f"scanning {len(audio_files)} chunks ...")
 
     results = {"keyword": keyword, "threshold": threshold, "anchor": anchor_desc,
                "window_seconds": window_samples / SAMPLE_RATE, "chunks": []}
@@ -101,9 +105,9 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
     if frame_mode:
         from embedders import FRAME_STRIDE, pooled_windows, samples_to_frames
         hop_frames = max(1, int(round(step_seconds * SAMPLE_RATE / FRAME_STRIDE)))
-        print(f"Frame backend: chunk-level forward, hop "
-              f"{hop_frames * FRAME_STRIDE * 1000 / SAMPLE_RATE:.0f}ms "
-              f"({hop_frames} frames)")
+        ui.step(f"frame backend: chunk-level forward, hop "
+                f"{hop_frames * FRAME_STRIDE * 1000 / SAMPLE_RATE:.0f}ms "
+                f"({hop_frames} frames)")
 
     for audio_file in audio_files:
         filename = os.path.basename(audio_file)
@@ -143,7 +147,7 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
             n_windows += len(starts)
 
         if n_windows == 0:
-            print(f"{filename}: shorter than the keyword window - skipped.")
+            ui.warn(f"{filename}: shorter than the keyword window - skipped")
             results["chunks"].append(
                 {"file": filename, "skipped": True, "detections": []})
             continue
@@ -170,25 +174,27 @@ def run_detection(keyword, anchor_audio=None, threshold=None, step_seconds=0.05,
         results["chunks"].append(chunk_record)
 
         if len(hit_idx) > 0:
+            ui.ok(f"MATCH  {filename} at {times[best]:.1f}s - "
+                  f"score {normed[best]:.2f} vs threshold {threshold:.2f} "
+                  f"(cos {raw[best]:.3f}, scale {win_scales[best]:.1f}x, "
+                  f"{len(hit_idx)} windows above)")
             stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            msg = (f"[{stamp}] Match found! AS-norm score: {normed[best]:.2f} "
-                   f"(cos {raw[best]:.3f}, threshold {threshold:.2f}, "
-                   f"scale {win_scales[best]:.1f}x) | "
-                   f"Chunk: {filename} at {times[best]:.1f}s "
-                   f"({len(hit_idx)} windows above threshold)")
-            print(msg)
             with open(log_path, "a") as f:
-                f.write(msg + "\n")
+                f.write(f"[{stamp}] Match found! AS-norm score: "
+                        f"{normed[best]:.2f} (cos {raw[best]:.3f}, threshold "
+                        f"{threshold:.2f}, scale {win_scales[best]:.1f}x) | "
+                        f"Chunk: {filename} at {times[best]:.1f}s "
+                        f"({len(hit_idx)} windows above threshold)\n")
         else:
-            print(f"Processed {filename} - no match. "
-                  f"(best AS-norm {normed[best]:.2f} at {times[best]:.1f}s, "
-                  f"cos {raw[best]:.3f}, scale {win_scales[best]:.1f}x)")
+            ui.item(f"{filename:<14} no match   "
+                    f"(best {normed[best]:5.2f} at {times[best]:4.1f}s, "
+                    f"cos {raw[best]:.3f}, scale {win_scales[best]:.1f}x)")
 
     with open(json_path, "w") as f:
         json.dump(results, f, indent=2)
     n_hits = sum(1 for c in results["chunks"] if c.get("detections"))
-    print(f"\nDone. {n_hits}/{len(audio_files)} chunks contained detections.")
-    print(f"Results: {json_path}")
+    ui.ok(f"{n_hits}/{len(audio_files)} chunks contained detections")
+    ui.done(os.path.relpath(json_path, PROJECT_ROOT), t0)
 
 
 if __name__ == "__main__":
@@ -209,8 +215,8 @@ if __name__ == "__main__":
     if keyword is None:
         kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
         if not os.path.exists(kw_file):
-            print("No --keyword given and selected_keyword.txt not found. "
-                  "Pass --keyword <word>.")
+            ui.fail("No --keyword given and selected_keyword.txt not found. "
+                    "Pass --keyword <word>.")
             raise SystemExit(1)
         keyword = open(kw_file).read().strip()
 

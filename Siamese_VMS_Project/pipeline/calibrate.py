@@ -24,6 +24,7 @@ Output: keywords/<keyword>_calibration.json
 import argparse
 import json
 import os
+import time
 from datetime import datetime
 
 import numpy as np
@@ -32,6 +33,7 @@ import numpy as np
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
+import console as ui
 from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
                      asnorm_windows, calibration_path, keyword_free_chunks,
                      l2_normalize, load_cohort, load_siamese_model,
@@ -52,13 +54,18 @@ def main():
     if keyword is None:
         kw_file = os.path.join(PROJECT_ROOT, "selected_keyword.txt")
         if not os.path.exists(kw_file):
-            print("No --keyword given and selected_keyword.txt not found.")
+            ui.fail("No --keyword given and selected_keyword.txt not found.")
             return
         keyword = open(kw_file).read().strip()
 
+    t0 = time.perf_counter()
+    ui.banner("THRESHOLD CALIBRATION", f"keyword: {keyword}")
+    ui.kv("negatives", args.negatives)
+    ui.kv("false-alarm percentile", f"p{args.fa_percentile:g}")
+
     anchor_npz = anchor_path(keyword)
     if not os.path.exists(anchor_npz):
-        print(f"{anchor_npz} not found - run keyword_generator.py first.")
+        ui.fail(f"{anchor_npz} not found - run keyword_generator.py first.")
         return
     data = np.load(anchor_npz)
     centroid = l2_normalize(data["centroid"])
@@ -68,7 +75,7 @@ def main():
     cohort = load_cohort(keyword)
     model = load_siamese_model()
 
-    print(f"Embedding {args.negatives} fresh negative stream windows...")
+    ui.step(f"embedding {args.negatives} fresh negative stream windows ...")
     rng = np.random.default_rng(args.seed)
     # Leakage guard: never sample "negatives" from chunks whose transcript
     # contains the keyword - with a discriminative embedding the sampled
@@ -94,22 +101,26 @@ def main():
     threshold = float(np.percentile(neg_scores, args.fa_percentile)) + 1e-4
     est_recall = float((pos_scores >= threshold).mean())
 
-    print("\n--- Calibration report ---")
-    print(f"keyword: '{keyword}'  |  cohort size: {cohort.shape[0]}  |  top-k: {args.top_k}")
-    print(f"negatives (n={len(neg_scores)}): mean={neg_scores.mean():.3f} "
-          f"std={neg_scores.std():.3f} p99={np.percentile(neg_scores, 99):.3f} "
-          f"max={neg_scores.max():.3f}")
-    print(f"positives (n={len(pos_scores)}): mean={pos_scores.mean():.3f} "
-          f"min={pos_scores.min():.3f}")
-    print(f"threshold = p{args.fa_percentile:g}(negatives) = {threshold:.3f}")
-    print("operating points (threshold -> TTS-positive recall):")
+    ui.rule()
+    ui.kv("cohort size / top-k", f"{cohort.shape[0]} / {args.top_k}")
+    ui.kv(f"negatives (n={len(neg_scores)})",
+          f"mean={neg_scores.mean():.3f} std={neg_scores.std():.3f} "
+          f"p99={np.percentile(neg_scores, 99):.3f} max={neg_scores.max():.3f}")
+    ui.kv(f"positives (n={len(pos_scores)})",
+          f"mean={pos_scores.mean():.3f} min={pos_scores.min():.3f}")
+    ui.kv("threshold",
+          f"p{args.fa_percentile:g}(negatives) = {threshold:.3f}")
+    ui.item("operating points (threshold -> TTS-positive recall):")
     for pct in (95.0, 99.0, 99.5, 100.0):
         t = float(np.percentile(neg_scores, pct))
         r = float((pos_scores >= t).mean())
-        print(f"  FA<={100 - pct:>4.1f}%/window  t={t:>7.3f}  recall={r:.1%}")
+        ui.item(f"  FA<={100 - pct:>4.1f}%/window  t={t:>7.3f}  recall={r:.1%}")
     margin = float(pos_scores.mean() - threshold)
-    print(f"margin (pos_mean - threshold): {margin:+.3f} "
-          f"{'OK' if margin > 0 else '!! positives overlap negatives - expect misses (domain gap)'}")
+    if margin > 0:
+        ui.ok(f"margin (pos_mean - threshold): {margin:+.3f}")
+    else:
+        ui.warn(f"margin (pos_mean - threshold): {margin:+.3f} - positives "
+                f"overlap negatives, expect misses (domain gap)")
 
     out = {
         "keyword": keyword,
@@ -132,8 +143,8 @@ def main():
     out_path = calibration_path(keyword)
     with open(out_path, "w") as f:
         json.dump(out, f, indent=2)
-    print(f"\nCalibration saved: {out_path}")
-    print("Next: python detector.py")
+    ui.done(os.path.relpath(out_path, PROJECT_ROOT), t0)
+    ui.item("next: python pipeline/detector.py")
 
 
 if __name__ == "__main__":
