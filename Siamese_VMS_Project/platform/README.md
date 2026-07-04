@@ -1,8 +1,15 @@
 # Live Monitoring Platform
 
 GUI front-end for the Siamese KWS pipeline, modeled on the original VMS
-project's `vms.py`. Enter a keyword and a live-stream (YouTube) URL, press
-**Start**, and the platform monitors the stream for the keyword.
+project's `vms.py`. Downloading and detection start independently:
+
+- **Start Download** — begins pulling stream chunks with just the URL; the
+  keyword can still be blank or changed while chunks accumulate.
+- **Start Detection** — sends the entered keyword to the running worker
+  (or starts everything at once if download hasn't begun), which builds
+  the keyword artifacts and starts scanning — including the chunks that
+  arrived while the keyword was being decided.
+- **Finish** — stops the session.
 
 ```
 python platform/gui.py
@@ -35,10 +42,11 @@ new segment (dedup by URI path — YouTube re-signs query strings — plus
 content md5), converts it to audio, and queues it for the detector. It runs
 until you click **Finish**.
 
-**Setup (first run per keyword, slow, runs while downloading continues):**
-synthesize the multi-voice TTS anchor → wait for ~10 bootstrap chunks →
-build the AS-norm cohort → calibrate the detection threshold. Later runs
-with the same keyword skip all of this.
+**Setup (begins when Start Detection is pressed; first run per keyword is
+slow, and downloading continues throughout):** synthesize the multi-voice
+TTS anchor → wait until ~10 chunks exist on disk → build the AS-norm
+cohort → calibrate the detection threshold. Later runs with the same
+keyword skip all of this.
 
 **Live:** the detector consumes the queue: each chunk is scanned by the
 Siamese AS-norm detector (50 ms hop — must match the calibration window

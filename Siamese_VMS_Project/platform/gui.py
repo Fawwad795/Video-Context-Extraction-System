@@ -1,9 +1,17 @@
 """Siamese KWS live monitoring platform - GUI.
 
-Modeled on the original VMS GUI (Correlation_VMS_Project/vms.py): enter a
-keyword and a live-stream URL, press Start. A worker subprocess
-(live_worker.py) builds the keyword artifacts, then monitors the stream:
-chunks containing a keyword detection are saved to
+Modeled on the original VMS GUI (Correlation_VMS_Project/vms.py), with
+downloading and detection started independently:
+
+  Start Download   - begins pulling stream chunks immediately (URL only);
+                     the keyword can still be blank or changed.
+  Start Detection  - sends the keyword to the running worker (starting it
+                     first if needed), which builds the keyword artifacts
+                     and begins scanning - including the chunks that
+                     accumulated while the keyword was being decided.
+  Finish           - stops everything.
+
+Chunks containing a keyword detection are saved to
 platform/data/detections/<keyword>/ (video + audio + JSON record), all
 other chunks are deleted after analysis so the run never accumulates data.
 
@@ -67,13 +75,24 @@ class PlatformGUI:
         self.url_entry = ttk.Entry(frame, width=46)
         self.url_entry.grid(row=2, column=3, padx=5, pady=5, sticky="we")
 
-        self.action_button = ttk.Button(frame, text="Start",
-                                        command=self.toggle, style="Stream.TButton")
-        self.action_button.grid(row=3, column=1, pady=8, sticky="w")
-        self.view_button = ttk.Button(frame, text="View Detections",
+        buttons = ttk.Frame(frame, style="Stream.TFrame")
+        buttons.grid(row=3, column=0, columnspan=3, pady=8, sticky="w")
+        self.download_button = ttk.Button(buttons, text="Start Download",
+                                          command=self.start_download,
+                                          style="Stream.TButton")
+        self.download_button.pack(side="left", padx=(0, 6))
+        self.detect_button = ttk.Button(buttons, text="Start Detection",
+                                        command=self.start_detection,
+                                        style="Stream.TButton")
+        self.detect_button.pack(side="left", padx=(0, 6))
+        self.finish_button = ttk.Button(buttons, text="Finish",
+                                        command=self.stop, state="disabled",
+                                        style="Stream.TButton")
+        self.finish_button.pack(side="left", padx=(0, 6))
+        self.view_button = ttk.Button(buttons, text="View Detections",
                                       command=self.open_detections,
                                       style="Stream.TButton")
-        self.view_button.grid(row=3, column=2, pady=8)
+        self.view_button.pack(side="left")
         self.queue_label = ttk.Label(frame, text="Backlog: 0",
                                      style="Stream.TLabel")
         self.queue_label.grid(row=3, column=3, pady=8, sticky="w")
@@ -103,63 +122,95 @@ class PlatformGUI:
         self.update_count()
 
     # ------------------------------------------------------------- actions
-    def toggle(self):
-        if self.process and self.process.poll() is None:
-            self.stop()
-        else:
-            self.start()
+    def worker_running(self):
+        return self.process is not None and self.process.poll() is None
 
-    def start(self):
-        keyword = self.word_entry.get().strip().lower()
-        url = self.url_entry.get().strip()
-        if not keyword or " " in keyword:
-            messagebox.showwarning("Input", "Enter a single keyword (no spaces).")
-            return
-        if not url:
-            messagebox.showwarning("Input", "Enter a live stream URL.")
-            return
-
-        self.keyword = keyword
+    def launch_worker(self, url):
+        """Start the worker in download-only mode (keyword sent later)."""
         os.makedirs(os.path.join(DATA_ROOT, "logs"), exist_ok=True)
         session_path = os.path.join(
-            DATA_ROOT, "logs",
-            f"session_{datetime.now():%Y%m%d_%H%M%S}_{keyword}.log")
+            DATA_ROOT, "logs", f"session_{datetime.now():%Y%m%d_%H%M%S}.log")
         self.session_log = open(session_path, "a", encoding="utf-8")
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         self.process = subprocess.Popen(
-            [sys.executable, "-u", WORKER, "--keyword", keyword, "--url", url,
-             "--root", DATA_ROOT],
+            [sys.executable, "-u", WORKER, "--url", url, "--root", DATA_ROOT],
             cwd=PLATFORM_DIR, env=env,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1)
         self.reader = threading.Thread(target=self.read_output, daemon=True)
         self.reader.start()
 
-        self.action_button.config(text="Finish", style="Running.TButton")
+        self.download_button.config(state="disabled")
+        self.finish_button.config(state="normal")
+        self.append_log(f"--- download started: url={url} ---")
+
+    def start_download(self):
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("Input", "Enter a live stream URL.")
+            return
+        if self.worker_running():
+            return
+        self.launch_worker(url)
+        self.phase_label.config(text="Phase: download")
+        self.status_label.config(
+            text="Status: downloading chunks - enter a keyword and press "
+                 "Start Detection when ready.")
+
+    def start_detection(self):
+        keyword = self.word_entry.get().strip().lower()
+        if not keyword or " " in keyword:
+            messagebox.showwarning("Input", "Enter a single keyword (no spaces).")
+            return
+        if not self.worker_running():
+            # One-click flow: start downloading and detecting together.
+            url = self.url_entry.get().strip()
+            if not url:
+                messagebox.showwarning("Input", "Enter a live stream URL.")
+                return
+            self.launch_worker(url)
+
+        self.keyword = keyword
+        try:
+            self.process.stdin.write(f"KEYWORD {keyword}\n")
+            self.process.stdin.flush()
+        except OSError as e:
+            messagebox.showerror("Worker", f"Could not send keyword: {e}")
+            return
+
+        self.detect_button.config(state="disabled")
+        self.word_entry.config(state="disabled")
         self.phase_label.config(text="Phase: setup")
         self.status_label.config(
-            text="Status: worker started - building keyword artifacts "
-                 "(first run for a keyword can take a while)")
-        self.append_log(f"--- session started: keyword='{keyword}' url={url} ---")
+            text=f"Status: keyword '{keyword}' sent - building keyword "
+                 "artifacts (first run for a keyword can take a while)")
+        self.append_log(f"--- detection started: keyword='{keyword}' ---")
 
     def stop(self):
-        if self.process and self.process.poll() is None:
+        if self.worker_running():
             if os.name == "nt":
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 self.process.terminate()
         self.process = None
-        self.action_button.config(text="Start", style="Stream.TButton")
+        self.reset_buttons()
         self.phase_label.config(text="Phase: idle")
         self.status_label.config(text="Status: stopped.")
         self.append_log("--- session stopped ---")
         if self.session_log:
             self.session_log.close()
             self.session_log = None
+
+    def reset_buttons(self):
+        self.download_button.config(state="normal")
+        self.detect_button.config(state="normal")
+        self.finish_button.config(state="disabled")
+        self.word_entry.config(state="normal")
 
     def open_detections(self):
         keyword = self.word_entry.get().strip().lower()
@@ -208,7 +259,7 @@ class PlatformGUI:
                 self.status_label.config(
                     text=f"Status: worker exited (code {code}) - see log above.")
                 self.process = None
-                self.action_button.config(text="Start", style="Stream.TButton")
+                self.reset_buttons()
                 self.phase_label.config(text="Phase: idle")
         else:
             self.append_log(line)

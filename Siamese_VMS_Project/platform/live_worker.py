@@ -1,7 +1,10 @@
 """Live monitoring worker for the Siamese KWS platform.
 
-Launched by platform/gui.py as a subprocess. One keyword + one live-stream
-URL per run. Everything it reads/writes lives under the platform data root
+Launched by platform/gui.py as a subprocess. One live-stream URL per run;
+the keyword can be given up-front (--keyword) or sent later as a
+'KEYWORD <word>' line on stdin - downloading starts immediately either
+way, so chunks accumulate while the user is still deciding what to search
+for. Everything it reads/writes lives under the platform data root
 (platform/data by default) - never in the research folders - via the
 SIAMESE_PROJECT_ROOT override in core/scoring.py.
 
@@ -130,25 +133,21 @@ class StreamDownloader(threading.Thread):
     stable identity) plus downloaded-bytes md5 as a backstop. Both sets are
     bounded so a multi-hour run cannot grow memory without limit.
 
-    Chunks with index < protect_below are the setup bootstrap set: they are
-    written to disk but NOT enqueued (the main thread processes them from
-    disk after setup, and setup scripts read them meanwhile).
-
-    Backlog cap policy when the detector falls behind:
+    Every kept chunk is enqueued. Backlog cap policy when the consumer is
+    not keeping up (or has not started yet):
       setup_mode=True  - skip new segments once the queue is full, so files
                          that setup scripts are reading never get deleted;
       setup_mode=False - drop the OLDEST unprocessed chunk (delete its
                          files), keeping the monitor close to live.
     """
 
-    def __init__(self, url, video_dir, audio_dir, start_index, protect_below,
+    def __init__(self, url, video_dir, audio_dir, start_index,
                  chunk_queue, backlog_cap, max_remember=8192):
         super().__init__(daemon=True)
         self.url = url
         self.video_dir = video_dir
         self.audio_dir = audio_dir
         self.index = start_index
-        self.protect_below = protect_below
         self.queue = chunk_queue
         self.backlog_cap = backlog_cap
         self.max_remember = max_remember
@@ -195,11 +194,6 @@ class StreamDownloader(threading.Thread):
             return False
         self.index += 1
         self.downloaded += 1
-
-        if idx < self.protect_below:
-            status(f"Bootstrap chunk live_{idx} downloaded "
-                   f"({self.protect_below - idx - 1} more needed for setup)")
-            return True
 
         # Live cap: drop the oldest unprocessed chunk(s) to stay near-live.
         while self.queue.qsize() >= self.backlog_cap:
@@ -332,7 +326,10 @@ def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
 
 def main():
     ap = argparse.ArgumentParser(description="Siamese KWS live platform worker.")
-    ap.add_argument("--keyword", required=True)
+    ap.add_argument("--keyword", default=None,
+                    help="keyword to monitor; omit to start downloading "
+                         "immediately and receive the keyword later as a "
+                         "'KEYWORD <word>' line on stdin")
     ap.add_argument("--url", required=True, help="live stream URL")
     ap.add_argument("--root", default=DEFAULT_DATA_ROOT,
                     help="platform data root (isolated from the research folders)")
@@ -343,7 +340,7 @@ def main():
                     help="max unprocessed chunks kept on disk before dropping")
     args = ap.parse_args()
 
-    keyword = args.keyword.strip().lower()
+    keyword = args.keyword.strip().lower() if args.keyword else None
     data_root = os.path.abspath(args.root)
 
     # All pipeline scripts + core modules resolve their paths through this.
@@ -362,13 +359,51 @@ def main():
     video_dir = os.path.join(data_root, "videos")
     kw_dir = os.path.join(data_root, "keywords")
     log_dir = os.path.join(data_root, "logs")
-    det_dir = os.path.join(data_root, "detections", keyword)
-    for d in (audio_dir, video_dir, kw_dir, log_dir, det_dir):
+    for d in (audio_dir, video_dir, kw_dir, log_dir):
         os.makedirs(d, exist_ok=True)
 
     sys.path.insert(0, CORE_DIR)
     sys.path.insert(0, PIPELINE_DIR)
 
+    # Chunks left on disk by a previous run (killed mid-processing): they are
+    # scanned before the live queue, and count toward the bootstrap set.
+    pre_existing = sorted(
+        (os.path.join(audio_dir, f) for f in os.listdir(audio_dir)
+         if f.startswith("live_") and f.endswith(".wav")),
+        key=lambda p: int(os.path.basename(p).split("_")[1].split(".")[0]))
+
+    start_index = next_live_index(audio_dir, video_dir)
+
+    # -- Downloading starts NOW, keyword or not, and never stops until the
+    # user hits Finish. Every new chunk is enqueued; queued chunks stay on
+    # disk until the live loop consumes them (setup_mode never deletes), so
+    # chunks downloaded while the keyword is still undecided are neither
+    # lost nor exempt from scanning.
+    chunk_queue = queue.Queue()
+    downloader = StreamDownloader(args.url, video_dir, audio_dir, start_index,
+                                  chunk_queue, args.backlog_cap)
+    downloader.start()
+
+    # -- 0. Wait for the keyword if it was not given up-front ---------------
+    if keyword is None:
+        emit("PHASE", "download")
+        status("Downloading chunks - enter a keyword and press "
+               "Start Detection when ready.")
+        while True:
+            line = sys.stdin.readline()
+            if not line:  # GUI went away without ever picking a keyword
+                status("stdin closed with no keyword - stopping.")
+                return
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0].upper() == "KEYWORD":
+                candidate = parts[1].strip().lower()
+                if candidate and " " not in candidate:
+                    keyword = candidate
+                    break
+                status(f"Invalid keyword {parts[1]!r} - send a single word.")
+
+    det_dir = os.path.join(data_root, "detections", keyword)
+    os.makedirs(det_dir, exist_ok=True)
     emit("PHASE", "setup")
 
     # Artifact names carry a backend suffix (e.g. _wavlm10ft for the
@@ -382,24 +417,6 @@ def main():
     calib_file = calibration_path(keyword)
     needs_setup = not all(os.path.exists(p) for p in
                           (anchor_file, cohort_file, calib_file))
-
-    # Chunks left on disk by a previous run (killed mid-processing): they are
-    # scanned before the live queue, and count toward the bootstrap set.
-    pre_existing = sorted(
-        (os.path.join(audio_dir, f) for f in os.listdir(audio_dir)
-         if f.startswith("live_") and f.endswith(".wav")),
-        key=lambda p: int(os.path.basename(p).split("_")[1].split(".")[0]))
-
-    start_index = next_live_index(audio_dir, video_dir)
-    protect_below = start_index
-    if needs_setup:
-        protect_below += max(0, args.bootstrap_chunks - len(pre_existing))
-
-    # -- Downloading starts NOW and never stops until the user hits Finish --
-    chunk_queue = queue.Queue()
-    downloader = StreamDownloader(args.url, video_dir, audio_dir, start_index,
-                                  protect_below, chunk_queue, args.backlog_cap)
-    downloader.start()
 
     # -- 1. TTS prototype anchor (also creates <kw>_variants/) --------------
     if not os.path.exists(anchor_file):
@@ -492,12 +509,10 @@ def main():
                 if os.path.exists(p):
                     os.remove(p)
 
-    # Disk backlog first: chunks from a previous run + the bootstrap set
-    # (real stream data whose setup role is done - scanned like any chunk).
-    disk_backlog = list(pre_existing)
-    for idx in range(start_index, protect_below):
-        disk_backlog.append(os.path.join(audio_dir, f"live_{idx}.wav"))
-    for audio_path in disk_backlog:
+    # Disk backlog first: chunks left over from a previous run. Everything
+    # downloaded during THIS run (bootstrap included) is already in the
+    # queue and gets scanned by the live loop below.
+    for audio_path in pre_existing:
         video_path = os.path.join(
             video_dir, os.path.basename(audio_path)[:-4] + ".mp4")
         process_chunk(video_path, audio_path)
