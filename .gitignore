@@ -57,6 +57,7 @@ Siamese_VMS_Project/audios_prev/
 Siamese_VMS_Project/videos_prev/
 Siamese_VMS_Project/audios_denoised/
 Siamese_VMS_Project/pretrained_models/
+Siamese_VMS_Project/ablation_study/runs/
 
 # --- PhonMatchNet (G2P / query-by-text) approach ---
 PhonMatchNet_VMS_Project/vms_out/

@@ -1,0 +1,209 @@
+{
+  "keywords": ["russia", "weather", "scotland", "ireland", "brighten"],
+  "configs": [
+    {
+      "config_id": "baseline",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "voices_17",
+      "params": {
+        "n_random": 5,
+        "n_blend": 5,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "voices_13",
+      "params": {
+        "n_random": 3,
+        "n_blend": 3,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "voices_7",
+      "params": {
+        "n_random": 0,
+        "n_blend": 0,
+        "n_augment": 2,
+        "holdout": 4,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "augment_1",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 1,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "augment_0",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 0,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "cohort_tts_25",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 25,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "cohort_tts_0",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": true,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "cohort_stream_100",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 100,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "cohort_stream_50",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 50,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 40000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "calib_neg_400",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 400,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    },
+    {
+      "config_id": "calib_neg_2000",
+      "params": {
+        "n_random": 13,
+        "n_blend": 10,
+        "n_augment": 2,
+        "holdout": 6,
+        "kg_seed": 42,
+        "stream_windows": 200,
+        "tts_words": 50,
+        "no_tts": false,
+        "cohort_seed": 123,
+        "negatives": 2000,
+        "fa_percentile": 100,
+        "calib_seed": 777
+      }
+    }
+  ]
+}

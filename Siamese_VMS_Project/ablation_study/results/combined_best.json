@@ -1,0 +1,22 @@
+{
+  "config_id": "combined_best",
+  "params": {
+    "n_random": 0,
+    "n_blend": 0,
+    "n_augment": 2,
+    "holdout": 4,
+    "kg_seed": 42,
+    "stream_windows": 50,
+    "tts_words": 0,
+    "no_tts": true,
+    "cohort_seed": 123,
+    "negatives": 40000,
+    "fa_percentile": 100,
+    "calib_seed": 777
+  },
+  "merged_from": [
+    "voices_7",
+    "cohort_tts_0",
+    "cohort_stream_50"
+  ]
+}

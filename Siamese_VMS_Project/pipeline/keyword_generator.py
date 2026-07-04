@@ -32,7 +32,8 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 from augment_utils import augment_audio
-from scoring import PROJECT_ROOT, SAMPLE_RATE, embed_batch, l2_normalize, load_siamese_model
+from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, embed_batch,
+                     l2_normalize, load_siamese_model)
 
 # Block-start indices of the 7 CMU ARCTIC speakers in Matthijs/cmu-arctic-xvectors
 CANONICAL_SPEAKERS = {
@@ -48,10 +49,16 @@ def load_tts():
 
     print("Loading SpeechT5 models...")
     processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-    tts_model = SpeechT5ForTextToSpeech.from_pretrained(
-        "microsoft/speecht5_tts", use_safetensors=True)
-    vocoder = SpeechT5HifiGan.from_pretrained(
-        "microsoft/speecht5_hifigan", use_safetensors=True)
+    try:
+        tts_model = SpeechT5ForTextToSpeech.from_pretrained(
+            "microsoft/speecht5_tts", use_safetensors=True)
+    except OSError:
+        tts_model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts")
+    try:
+        vocoder = SpeechT5HifiGan.from_pretrained(
+            "microsoft/speecht5_hifigan", use_safetensors=True)
+    except OSError:
+        vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
     print("Loading speaker x-vectors...")
     xvectors = load_dataset("Matthijs/cmu-arctic-xvectors", split="validation")
     return processor, tts_model, vocoder, xvectors
@@ -175,7 +182,7 @@ def main():
     print(f"Centroid cohesion: cos(variant, centroid) "
           f"mean={cos_to_centroid.mean():.3f} min={cos_to_centroid.min():.3f}")
 
-    out_path = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_anchor.npz")
+    out_path = anchor_path(keyword)
     np.savez(out_path,
              centroid=centroid.astype(np.float32),
              positives=positives.astype(np.float32),
