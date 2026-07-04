@@ -13,6 +13,7 @@ pointers to the surviving artifacts. Complements `SIAMESE_PROGRESS_REPORT.md`
 | C — Iran deal report | 2026-07-02 (day) | correspondent report ("administration", "immigration", "washington") | retired, chunks deleted; transcript archived at `Reports/archive_chunksets/transcripts_setC_iran_deal_2026-07-02.txt` |
 | D — Sky News weather/news | since 2026-07-02 (evening) | UK weather bulletin into a news segue | **current** (`audios/Chunkset_D/`), all 10 chunks content-verified unique |
 | E — Iran deal report | added 2026-07-04 | correspondent report ("administration", "immigration") — same broadcast register as retired Set C but a fresh chunk pull | **current** (`audios/Chunkset_E/`); contains duplicated pairs (live_4≡6, live_5≡7) |
+| F — US Independence Day feature | 2026-07-04 | Sky News package on the US anniversary celebrations (Trump, state fair, vox pops) — **20 chunks**, first set larger than 10 | **current** (`audios/Chunkset_F/`), all 20 content-verified unique |
 
 Since 2026-07-04 chunk sets live side by side under `audios/<Chunkset>/`
 (each with its own `transcripts.txt`); select one via `SIAMESE_AUDIO_DIR`.

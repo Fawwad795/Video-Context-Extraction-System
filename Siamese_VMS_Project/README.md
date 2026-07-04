@@ -192,8 +192,9 @@ Siamese_VMS_Project/
 ├── training/       AWS training scripts: v1 triplet, v2 GRL, v3 attentive head
 ├── checkpoints/    siamese_v1_best.pth, siamese_v2_best.pth, siamese_v3_best.pth
 ├── keywords/       generated anchors, cohorts, calibrations (gitignored, rebuildable)
-├── audios/         Chunkset_D/, Chunkset_E/ - chunks + transcripts.txt each
-│                   (select one via SIAMESE_AUDIO_DIR); videos/ mirrors chunks
+├── audios/         Chunkset_D/, Chunkset_E/, Chunkset_F/ - chunks +
+│                   transcripts.txt each (select one via SIAMESE_AUDIO_DIR);
+│                   videos/ mirrors the chunk sets
 ├── logs/           detection JSON + archive of historical runs
 └── reports/        experiment log + progress report
 ```
