@@ -374,6 +374,15 @@ def main():
 
     start_index = next_live_index(audio_dir, video_dir)
 
+    # The downloader thread lazily imports moviepy, which imports numpy.
+    # Importing a C-extension module inside a secondary thread deadlocks on
+    # Windows while the main thread is blocked on the stdin keyword wait
+    # (observed: numpy stuck in create_module in a faulthandler dump, first
+    # chunk downloaded but never converted). Pre-import in the MAIN thread
+    # before the downloader starts.
+    status("Loading audio/video libraries ...")
+    from moviepy.video.io.VideoFileClip import VideoFileClip  # noqa: F401
+
     # -- Downloading starts NOW, keyword or not, and never stops until the
     # user hits Finish. Every new chunk is enqueued; queued chunks stay on
     # disk until the live loop consumes them (setup_mode never deletes), so
