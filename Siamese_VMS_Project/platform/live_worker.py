@@ -324,7 +324,13 @@ def main():
 
     # All pipeline scripts + core modules resolve their paths through this.
     os.environ["SIAMESE_PROJECT_ROOT"] = data_root
+    # Both weight variables must be pinned: SIAMESE_WEIGHTS feeds the
+    # baseline backend, SIAMESE_V3_WEIGHTS the wavlm-trained attentive head.
+    # Their defaults resolve under PROJECT_ROOT, which the line above just
+    # redirected into the (checkpoint-less) platform data root - without
+    # this the trained head silently degrades to the identity-init head.
     os.environ["SIAMESE_WEIGHTS"] = args.weights
+    os.environ["SIAMESE_V3_WEIGHTS"] = args.weights
     os.environ.setdefault("SIAMESE_BACKEND", "wavlm-trained")
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 

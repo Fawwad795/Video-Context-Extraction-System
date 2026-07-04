@@ -137,6 +137,16 @@ def load_siamese_model():
         from embedders import TrainedWavLMEmbedder
         weights = V3_WEIGHTS_PATH if os.path.exists(V3_WEIGHTS_PATH) else None
         if weights is None:
+            # An identity-init head is the weak mean-pool backend in disguise
+            # (Set D micro F1 0.20 vs 1.00 trained) - refusing to run beats
+            # silently producing junk artifacts. Research escape hatch:
+            # SIAMESE_ALLOW_UNTRAINED_HEAD=1.
+            if os.environ.get("SIAMESE_ALLOW_UNTRAINED_HEAD") != "1":
+                raise FileNotFoundError(
+                    f"wavlm-trained backend needs its checkpoint: "
+                    f"{V3_WEIGHTS_PATH} not found. Set SIAMESE_V3_WEIGHTS to "
+                    f"the real path (or SIAMESE_ALLOW_UNTRAINED_HEAD=1 to "
+                    f"run the untrained identity head deliberately).")
             print(f"WARNING: {V3_WEIGHTS_PATH} not found - identity-init head.")
         return TrainedWavLMEmbedder(weights, BACKBONE, BACKBONE_LAYER)
     if BACKEND != "baseline":
