@@ -265,17 +265,41 @@ def next_live_index(*dirs):
 def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
                sample_rate, top_k):
     import numpy as np
-    from scoring import asnorm_windows, embed_batch
+    from scoring import asnorm_windows, embed_batch, l2_normalize
+
+    # Frame backends (the production wavlm-trained path) MUST score windows
+    # pooled from one chunk-level forward pass: calibrate.py fits the
+    # threshold through that exact protocol, and isolated-window embeddings
+    # land in a measurably different score region (experiment log,
+    # "scoring-protocol mismatch"). It is also ~100x faster per chunk.
+    frame_mode = getattr(model, "is_frame_backend", False)
+    if frame_mode:
+        from embedders import FRAME_STRIDE, pooled_windows, samples_to_frames
+        hop_frames = max(1, int(round(STEP_SECONDS * sample_rate / FRAME_STRIDE)))
+        chunk_frames = model.frames(y.astype(np.float32))
 
     step_samples = max(1, int(sample_rate * STEP_SECONDS))
     all_scores, all_raw, all_times, all_scales = [], [], [], []
     for scale in SCALES:
         ws = max(int(window_samples * scale), int(0.15 * sample_rate))
-        starts = list(range(0, len(y) - ws + 1, step_samples))
-        if not starts:
-            continue
-        windows = [y[s:s + ws].astype(np.float32) for s in starts]
-        embs = embed_batch(model, windows, batch_size=BATCH_SIZE)
+        if frame_mode:
+            wf = samples_to_frames(ws)
+            if hasattr(model, "pool_windows"):
+                embs, start_frames = model.pool_windows(
+                    chunk_frames, wf, hop_frames)
+            else:
+                embs, start_frames = pooled_windows(
+                    chunk_frames, wf, hop_frames)
+            if len(embs) == 0:
+                continue
+            embs = l2_normalize(embs)
+            starts = start_frames * FRAME_STRIDE
+        else:
+            starts = list(range(0, len(y) - ws + 1, step_samples))
+            if not starts:
+                continue
+            windows = [y[s:s + ws].astype(np.float32) for s in starts]
+            embs = embed_batch(model, windows, batch_size=BATCH_SIZE)
         normed, raw = asnorm_windows(embs, anchor, cohort, top_k)
         all_scores.append(normed)
         all_raw.append(raw)
