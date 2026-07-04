@@ -17,7 +17,6 @@ Architecture: downloading and detection are decoupled.
       invoking the original pipeline scripts as subprocesses):
         keyword_generator.py     TTS prototype anchor + variants
         (bootstrap wait)         until N chunks have arrived from the stream
-        convert_anchor_knnvc.py  anchor converted into the stream voice
         cohort_builder.py        AS-norm impostor cohort
         calibrate.py             per-keyword detection threshold
       Then the endless live loop: take the next chunk off the queue, scan it
@@ -315,7 +314,7 @@ def main():
                     help="platform data root (isolated from the research folders)")
     ap.add_argument("--weights", default=DEFAULT_WEIGHTS)
     ap.add_argument("--bootstrap-chunks", type=int, default=10,
-                    help="chunks needed up-front for cohort/calibration/kNN-VC")
+                    help="chunks needed up-front for cohort/calibration")
     ap.add_argument("--backlog-cap", type=int, default=300,
                     help="max unprocessed chunks kept on disk before dropping")
     args = ap.parse_args()
@@ -343,11 +342,10 @@ def main():
     emit("PHASE", "setup")
 
     anchor_path = os.path.join(kw_dir, f"{keyword}_anchor.npz")
-    tts_backup = os.path.join(kw_dir, f"{keyword}_anchor_tts.npz")
     cohort_file = os.path.join(kw_dir, f"cohort_{keyword}.npz")
     calib_file = os.path.join(kw_dir, f"{keyword}_calibration.json")
     needs_setup = not all(os.path.exists(p) for p in
-                          (anchor_path, tts_backup, cohort_file, calib_file))
+                          (anchor_path, cohort_file, calib_file))
 
     # Chunks left on disk by a previous run (killed mid-processing): they are
     # scanned before the live queue, and count toward the bootstrap set.
@@ -386,12 +384,7 @@ def main():
         while wav_count() < args.bootstrap_chunks:
             time.sleep(2)
 
-    # -- 3. kNN-VC anchor conversion into the stream voice ------------------
-    if not os.path.exists(tts_backup):
-        run_step("convert_anchor_knnvc.py", ["--keyword", keyword],
-                 "converting the anchor into the stream's voice (kNN-VC)")
-
-    # -- 4. Cohort + threshold calibration ----------------------------------
+    # -- 3. Cohort + threshold calibration ----------------------------------
     if not os.path.exists(cohort_file):
         run_step("cohort_builder.py", ["--keyword", keyword],
                  "building the AS-norm impostor cohort")
@@ -399,7 +392,7 @@ def main():
         run_step("calibrate.py", ["--keyword", keyword],
                  "calibrating the detection threshold")
 
-    # -- 5. Load runtime models once ----------------------------------------
+    # -- 4. Load runtime models once ----------------------------------------
     status("Loading Siamese detector ...")
     import librosa
     import numpy as np
@@ -414,7 +407,7 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
-    # -- 6. Live loop (endless: runs until the user clicks Finish) ----------
+    # -- 5. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
     emit("PHASE", "live")
     live_log = os.path.join(log_dir, f"live_{keyword}.txt")

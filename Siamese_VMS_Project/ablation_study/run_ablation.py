@@ -2,7 +2,7 @@
 
 Each config gets an isolated SIAMESE_PROJECT_ROOT under runs/<config_id>/.
 Audios + transcripts.txt are copied from audios/; keywords/ and logs/ are
-created fresh (no variant or kNN-VC wav reuse).
+created fresh (no variant wav reuse).
 
 Runs the full setup pipeline for five Set D keywords, times each step, and
 records micro-averaged P/R/F1 using audios/transcripts.txt ground truth
@@ -37,7 +37,6 @@ CHECKPOINT = os.path.join(SIAMESE_ROOT, "checkpoints", "siamese_v3_best.pth")
 
 STEPS = (
     "keyword_generator",
-    "convert_anchor_knnvc",
     "cohort_builder",
     "calibrate",
     "detector",
@@ -169,9 +168,6 @@ def run_pipeline_for_keyword(keyword, params, env):
         "--seed", str(p["kg_seed"]),
     ]
     step_seconds["keyword_generator"] = run_step("keyword_generator.py", args_kg, env)
-
-    step_seconds["convert_anchor_knnvc"] = run_step(
-        "convert_anchor_knnvc.py", ["--keyword", keyword], env)
 
     args_cb = [
         "--keyword", keyword,

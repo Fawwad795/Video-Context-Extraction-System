@@ -10,8 +10,8 @@ Two impostor sources:
   2. TTS distractor words in random voices - same-domain competition for the
      TTS anchor, so the anchor's synthetic-domain advantage is normalized
      away. Off by default: the pipeline ablation study (ablation_study/)
-     found no F1 gain from TTS distractors once the anchor goes through
-     kNN-VC conversion; enable with --tts if using a raw TTS anchor.
+     found no F1 gain from TTS distractors with the trained wavlm head;
+     enable with --tts to add them back.
 
 Output: cohort.npz (embeddings [N, D])
 """

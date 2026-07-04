@@ -20,7 +20,7 @@ platform/
   gui.py            the GUI (start here)
   live_worker.py    worker subprocess: setup + live monitoring loop
   data/             created at runtime - the platform's own project root
-    keywords/       TTS variants, kNN-VC anchor, cohort, calibration -
+    keywords/       TTS variants, anchor, cohort, calibration -
                     built once per keyword, reused after
     audios/ videos/ transient chunk files (deleted after analysis)
     logs/           session logs + per-keyword detection log
@@ -37,9 +37,8 @@ until you click **Finish**.
 
 **Setup (first run per keyword, slow, runs while downloading continues):**
 synthesize the multi-voice TTS anchor → wait for ~10 bootstrap chunks →
-convert the anchor into the stream voice with kNN-VC → build the AS-norm
-cohort → calibrate the detection threshold. Later runs with the same keyword
-skip all of this.
+build the AS-norm cohort → calibrate the detection threshold. Later runs
+with the same keyword skip all of this.
 
 **Live:** the detector consumes the queue: each chunk is scanned by the
 Siamese AS-norm detector (50 ms hop — must match the calibration window

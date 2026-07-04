@@ -45,8 +45,8 @@ def load_anchor(keyword, anchor_audio, model):
     npz_path = anchor_path(keyword)
     if not os.path.exists(npz_path):
         raise FileNotFoundError(
-            f"{npz_path} not found - run keyword_generator.py / "
-            f"convert_anchor_knnvc.py for this backend first "
+            f"{npz_path} not found - run keyword_generator.py for this "
+            f"backend first "
             f"(or pass --anchor-audio <wav/m4a> to use a recorded anchor).")
     data = np.load(npz_path)
     return (l2_normalize(data["centroid"]), int(data["window_samples"]),

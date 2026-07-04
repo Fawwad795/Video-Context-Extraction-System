@@ -11,7 +11,11 @@ pointers to the surviving artifacts. Complements `SIAMESE_PROGRESS_REPORT.md`
 | A — scripted news | ≤ 2026-06-10 | BBC-style scripted delivery | retired, chunks deleted |
 | B — conversational debate | 2026-06-10 → 2026-07-02 | Elon Musk debate panel ("penalty", "elon", "appropriate") | retired, chunks deleted |
 | C — Iran deal report | 2026-07-02 (day) | correspondent report ("administration", "immigration", "washington") | retired, chunks deleted; transcript archived at `Reports/archive_chunksets/transcripts_setC_iran_deal_2026-07-02.txt` |
-| D — Sky News weather/news | since 2026-07-02 (evening) | UK weather bulletin into a news segue | **current** (`audios/` + `audios/transcripts.txt`), all 10 chunks content-verified unique |
+| D — Sky News weather/news | since 2026-07-02 (evening) | UK weather bulletin into a news segue | **current** (`audios/Chunkset_D/`), all 10 chunks content-verified unique |
+| E — Iran deal report | added 2026-07-04 | correspondent report ("administration", "immigration") — same broadcast register as retired Set C but a fresh chunk pull | **current** (`audios/Chunkset_E/`); contains duplicated pairs (live_4≡6, live_5≡7) |
+
+Since 2026-07-04 chunk sets live side by side under `audios/<Chunkset>/`
+(each with its own `transcripts.txt`); select one via `SIAMESE_AUDIO_DIR`.
 
 All experiments are 10 chunks, chunk-level ground truth from whisper-tiny
 (`validate_detection.py`). Sets B and C contained duplicated chunks (e.g. B:
@@ -53,6 +57,9 @@ from that stage have been removed.
 | 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** — all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03) — see "Step 3" below | `logs/detections_*.json` (current) |
 | 2026-07-03 | outbreaks | D | kNN-VC converted | wavlm-trained, detector alone | 1.729 (aligned-p100) | 1/0/1 | P 1.00 / R 0.50 / F1 = 0.67 — live_7 direct hit (+1.74); live_2 FN is a chunk-boundary case (keyword ends 30 ms before chunk end, no fully-contained window) — see "Sixth keyword" under Step 3 | `logs/detections_outbreaks.json` |
 | 2026-07-03 | insurance | D | kNN-VC converted | wavlm-trained, detector alone | 0.669 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — single true chunk (live_8, "...travel insurance proudly sponsors...") direct hit at 5.58 (+4.91 margin, cos 0.913, 27 windows above threshold); tightest negative (live_7) sat at 0.67, right at but not over threshold | `logs/detections_insurance.json` |
+| 2026-07-04 | western | D | kNN-VC converted | wavlm-trained, detector alone, combined_best defaults | 6.228 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — first run with the ablation sweet-spot defaults baked in; pipeline 2.7 min end-to-end | `logs/detections_western.json` |
+| 2026-07-04 | sunny / windy / showers | D | **TTS centroid AND kNN-VC converted (both)** | wavlm-trained, detector alone | per-keyword aligned-p100 | 3/0/0 each way | **F1 = 1.00 both with and without kNN-VC, all 3 keywords** (kNN-VC retirement ablation) | `ablation_study/results/knnvc_ablation.jsonl` |
+| 2026-07-04 | administration | **E** | **TTS centroid (no kNN-VC)** | wavlm-trained, detector alone | 3.276 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — near-homophone "immigration" chunk rejected at 2.04; compare F1 0.40 for the same keyword on Set C under v1 baseline + kNN-VC | `logs/detections_administration.json` |
 
 Note: `detector.py` labels every `.npz` anchor "TTS prototype centroid" in the
 JSON; for the 2026-07-02 rows the anchor was actually the kNN-VC-converted
@@ -216,6 +223,32 @@ boundary condition documented: direct threshold detection holds for words
 with at least one fully-contained window; edge-of-chunk words still need
 overlap.
 
+## kNN-VC retirement (2026-07-04)
+
+kNN-VC anchor conversion (finding 2 below) was built to fix the TTS↔real
+domain gap under the v1 frozen-backbone baseline. Two lines of evidence
+showed the Step-3 trained head makes it redundant:
+
+1. **Accidental ablation.** A defaults-sync bug (convert_anchor_knnvc.py
+   `--holdout` 6 vs keyword_generator.py's new 4) made the conversion
+   silently no-op (bare `return`, exit 0) for the `voices_7`/`combined_best`
+   pipeline-parameter ablation configs — which still scored micro F1 1.00
+   on all 5 Set D keywords with the raw TTS anchor.
+2. **Deliberate ablation** (`ablation_study/knnvc_ablation.py`, archived
+   branch): with the bug fixed, 3 fresh Set D keywords (sunny, windy,
+   showers) run both ways — F1 1.00 identical, kNN-VC only adding ~50 s
+   per keyword. Then `administration` on the new Set E without kNN-VC:
+   F1 1.00 with the near-homophone "immigration" rejected (2.04 vs
+   threshold 3.28) — the confusable-pair failure mode that motivated
+   kNN-VC in the first place (penalty/appropriate, F1 0.00, finding 1).
+
+9/9 keywords across two chunk sets show no F1 benefit. The stage was
+removed from the pipeline, platform worker, and ablation harness on
+2026-07-04; the full implementation (convert_anchor_knnvc.py,
+knnvc_ablation.py) is preserved on the **`archive/knnvc-pipeline`** branch.
+Historical rows above that say "kNN-VC converted" record runs made while
+the stage was active.
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
@@ -242,6 +275,11 @@ overlap.
    (/æ d m ɪ n ɪ s t ɹ eɪ ʃ ə n/ from TTS and from kNN-VC-converted
    clips alike), confirming phonetic content is preserved through kNN-VC
    even when embedding space was domain-sensitive.
+6. **The trained head subsumes kNN-VC.** Once finding 3's head is in place,
+   removing kNN-VC costs nothing on 9/9 keywords tested — including the
+   confusable-pair case (administration/immigration) that finding 2's fix
+   existed for. Retired 2026-07-04 (section above); the domain gap is now
+   closed in embedding space rather than in audio space.
 
 ## Artifact map (post-cleanup, 2026-07-02)
 

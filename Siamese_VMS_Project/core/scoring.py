@@ -19,7 +19,7 @@ import os
 import sys
 
 # Models/datasets this pipeline uses are fixed and already cached locally
-# (wavlm-base-plus[-sv], speecht5_tts/hifigan, cmu-arctic-xvectors, kNN-VC).
+# (wavlm-base-plus[-sv], speecht5_tts/hifigan, cmu-arctic-xvectors).
 # Default to offline mode so a flaky network doesn't break a cached-model
 # load on huggingface_hub's "check for updates" HTTP call. Must be set
 # before transformers/huggingface_hub is imported anywhere (below, via
@@ -311,8 +311,8 @@ def list_chunk_audios(audio_dir=AUDIO_DIR):
 def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
     """Live chunks whose transcript does not contain the keyword.
 
-    The same leakage guard as convert_anchor_knnvc.py, shared here because
-    calibration needs it too: negative windows sampled from keyword-bearing
+    Leakage guard for calibration and cohort sampling: negative windows
+    sampled from keyword-bearing
     chunks can include the actual keyword utterance, and a discriminative
     embedding then puts the false-alarm percentile ABOVE the true-keyword
     score (observed with the v3 trained head: scotland threshold 1.98 vs
