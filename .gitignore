@@ -60,6 +60,7 @@ Siamese_VMS_Project/pretrained_models/
 Siamese_VMS_Project/ablation_study/runs/
 Siamese_VMS_Project/ablation_study/results/*run_log*.txt
 Siamese_VMS_Project/selected_keyword.txt
+Siamese_VMS_Project/platform/data/
 
 # --- PhonMatchNet (G2P / query-by-text) approach ---
 PhonMatchNet_VMS_Project/vms_out/
