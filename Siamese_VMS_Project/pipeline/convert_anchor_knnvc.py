@@ -42,9 +42,9 @@ import torch
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
-from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, artifact_suffix,
-                     embed_batch, l2_normalize, list_chunk_audios,
-                     load_siamese_model)
+from scoring import (AUDIO_DIR, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
+                     artifact_suffix, embed_batch, l2_normalize,
+                     list_chunk_audios, load_siamese_model)
 
 MIN_CLIP_SECONDS = 0.15
 
@@ -62,7 +62,7 @@ def load_wav_tensor(path):
 
 def keyword_free_chunks(keyword):
     """Live chunks whose transcript does not contain the keyword."""
-    transcript_path = os.path.join(PROJECT_ROOT, "audios", "transcripts.txt")
+    transcript_path = os.path.join(AUDIO_DIR, "transcripts.txt")
     if not os.path.exists(transcript_path):
         transcript_path = os.path.join(PROJECT_ROOT, "transcripts.txt")
     contains_kw = {}

@@ -1,0 +1,3 @@
+{"keyword": "sunny", "no_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 169.6}, "with_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 224.5}}
+{"keyword": "windy", "no_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 134.4}, "with_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 188.2}}
+{"keyword": "showers", "no_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 148.7}, "with_knnvc": {"tp": 1, "fp": 0, "fn": 0, "tn": 9, "p": 1.0, "r": 1.0, "f1": 1.0, "seconds": 190.1}}

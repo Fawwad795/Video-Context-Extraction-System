@@ -319,7 +319,7 @@ def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
     true windows 1.85, the top 2 of 400 "negatives" being the keyword).
     """
     import re
-    transcript_path = os.path.join(PROJECT_ROOT, "audios", "transcripts.txt")
+    transcript_path = os.path.join(audio_dir, "transcripts.txt")
     contains_kw = {}
     if os.path.exists(transcript_path):
         current = None
