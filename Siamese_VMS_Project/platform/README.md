@@ -50,3 +50,8 @@ grid). For each chunk:
 
 so disk and memory stay flat during arbitrarily long runs (same
 keep-or-delete policy as the original VMS platform).
+
+The platform ends at detection. `transcribe_chunks.py` and
+`validate_detection.py` are offline research tools for measuring accuracy
+against ground truth — the live product never transcribes stream audio or
+second-guesses a detection; it saves the chunk and moves on.

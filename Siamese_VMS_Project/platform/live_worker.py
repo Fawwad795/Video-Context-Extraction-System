@@ -341,11 +341,17 @@ def main():
 
     emit("PHASE", "setup")
 
-    anchor_path = os.path.join(kw_dir, f"{keyword}_anchor.npz")
-    cohort_file = os.path.join(kw_dir, f"cohort_{keyword}.npz")
-    calib_file = os.path.join(kw_dir, f"{keyword}_calibration.json")
+    # Artifact names carry a backend suffix (e.g. _wavlm10ft for the
+    # production wavlm-trained backend) - resolve them through scoring so
+    # the "built once per keyword, reused after" check matches the files
+    # the pipeline scripts actually write. scoring reads the env overrides
+    # set above at import time, so this import must come after them.
+    from scoring import anchor_path, calibration_path, cohort_path
+    anchor_file = anchor_path(keyword)
+    cohort_file = cohort_path(keyword)
+    calib_file = calibration_path(keyword)
     needs_setup = not all(os.path.exists(p) for p in
-                          (anchor_path, cohort_file, calib_file))
+                          (anchor_file, cohort_file, calib_file))
 
     # Chunks left on disk by a previous run (killed mid-processing): they are
     # scanned before the live queue, and count toward the bootstrap set.
@@ -366,7 +372,7 @@ def main():
     downloader.start()
 
     # -- 1. TTS prototype anchor (also creates <kw>_variants/) --------------
-    if not os.path.exists(anchor_path):
+    if not os.path.exists(anchor_file):
         run_step("keyword_generator.py", ["--keyword", keyword],
                  f"synthesizing multi-voice TTS anchor for '{keyword}' "
                  "(first run downloads TTS models - please wait; the stream "
