@@ -250,6 +250,101 @@ knnvc_ablation.py) is preserved on the **`archive/knnvc-pipeline`** branch.
 Historical rows above that say "kNN-VC converted" record runs made while
 the stage was active.
 
+## Calibration leakage without transcripts (2026-07-05/06)
+
+**Bug.** The live platform's bootstrap calibration (`calibrate.py`, ~10
+chunks, no transcripts) can sample a chunk containing the keyword itself
+as a "negative." Since fa_percentile=100 sets the threshold to the
+highest-scoring negative window + ε, the threshold gets set to that
+utterance's own score — a guaranteed miss. Observed across four keywords
+on the live platform, each missing the exact utterance that contaminated
+its own calibration by one epsilon: `south` (4.3851 vs threshold 4.3852),
+`brain` (5.74 vs 5.743), `morning` (5.46 vs 5.463), `mexico` (7.24 vs
+7.244).
+
+**A full day (2026-07-05) was spent on transcription-free fixes, all
+tried, all reverted (commit `181ea7f`, restoring `core/scoring.py`,
+`pipeline/calibrate.py`, `pipeline/cohort_builder.py`,
+`platform/live_worker.py` to their pre-saga state at `706a275`):**
+
+1. *Score-in-positive-range excision* — a percentile-based reference from
+   the ~12 TTS positives was too fragile at that sample size (jumped
+   either too strict, missing real leaks, or too loose, misidentifying
+   genuine hard negatives as leaks and regressing leak-free calibration).
+2. *Temporal-burst clustering* — sliding-window overlap means ANY
+   strongly-matching moment, keyword or confusable, produces the same
+   clustering signature; not discriminative, also regressed clean data.
+3. *Generalized Pareto (EVT) tail fit* (`scoring.evt_threshold`, kept as
+   an opt-in research flag, not the default) — the most informative
+   negative result: a rigorous tail fit built from hundreds of points, not
+   one heuristic, still judged the leaked score statistically
+   unremarkable. No per-sample statistic can tell a leak apart from an
+   equally-extreme confusable, because that overlap is *why* p100 rather
+   than a percentile is the right rule to begin with.
+4. *Fixed-tolerance periodic recalibration* — excluding a small fixed
+   count of a growing pool's top scores before taking the max forces the
+   threshold below scores already known to be negatives once the pool is
+   small (a live `morning` session: threshold 5.463 → 2.065 on 6 pooled
+   chunks, ~7 clean chunks then fired as false positives — a sweep).
+5. *Held-chunk leave-one-out adjudication* — held no-match chunks until
+   real bootstrap-scale evidence existed (30 chunks), then ran one
+   adjudication: the highest-scoring held chunk fires only if it beats
+   every other held chunk AND sits at the current threshold's epsilon. No
+   tolerance, so no sweep — but bounded to recovering **at most one**
+   contaminated chunk per session by construction. A live `mexico` session
+   (a Mexico-focused broadcast, where the word is common rather than rare)
+   broke this differently: at least 6 genuine utterances were present
+   among the first 30 held chunks; only 1 was recovered, the other 5+
+   were permanently deleted in that same pass, and the recalibrated
+   threshold was itself set by a second real utterance — so any future
+   utterance at or below that new ceiling kept missing.
+
+**Root cause of all five failures:** none of them use any information
+beyond the score distribution itself, and a leaked keyword's score is
+provably indistinguishable from a legitimate hard negative's using score
+statistics alone (confirmed directly by finding 3 above) — worse, when
+the keyword recurs often, "at most one recoverable" is a hard ceiling no
+tuning of any of these designs can lift.
+
+**The fix: restore what the offline research pipeline always relied on.**
+`calibrate.py`'s `keyword_free_chunks()` transcript guard already existed
+and needs no code change — it was a no-op on the platform only because no
+transcript ever existed there. `platform/live_worker.py` now runs
+`transcribe_chunks.py --limit <bootstrap-chunks>` once, right after the
+bootstrap wait and before cohort/calibration, writing
+`<data_root>/audios/transcripts.txt` so `keyword_free_chunks()` picks it
+up automatically. Default model upgraded from whisper-tiny to
+**whisper-base** for this call specifically (already cached locally, ~2x
+tiny's params): a missed word here silently reintroduces the exact leak
+this exists to prevent, so accuracy matters more than for ground-truth
+evaluation elsewhere, where a little transcription noise averages out.
+This is the approach originally proposed when the `south` bug first
+surfaced and explicitly deferred at the time in favor of exploring
+transcription-free alternatives (all five above) - reconsidered once
+`mexico` proved none of them generalize to a keyword that recurs often.
+
+**Validation (real audio + model, not synthetic scores).** The
+`mexico` session's platform data was gone (cleared), so the fix was
+validated by simulating a fresh platform bootstrap against Chunkset D's
+10 chunks with no `transcripts.txt` present (copied without it, mirroring
+a raw platform download) — the same multi-occurrence stress case
+`mexico` exposed, since `scotland` occurs 3 times in that set:
+1. `keyword_generator.py --keyword scotland` → anchor built normally.
+2. `transcribe_chunks.py --limit 10` (whisper-base) → all 3 "Scotland"
+   mentions caught correctly, matching the curated ground-truth
+   transcript exactly.
+3. `cohort_builder.py` + `calibrate.py --keyword scotland` → threshold
+   2.315, n_neg=2316 (7 keyword-free chunks' windows, correctly excluding
+   all 3 scotland-bearing chunks at once — not just the highest-scoring
+   one), margin +1.452 (healthy, no domain-gap warning).
+4. `detector.py` + `validate_detection.py` → **TP=3 FP=0, F1=1.00** — all
+   3 occurrences detected, matching the pipeline's historical
+   oracle-calibration result on this keyword exactly.
+
+Unlike every reverted approach, this doesn't degrade as the keyword
+recurs more often - exclusion is by content, not by order statistics on
+a bounded sample.
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
@@ -281,6 +376,18 @@ the stage was active.
    confusable-pair case (administration/immigration) that finding 2's fix
    existed for. Retired 2026-07-04 (section above); the domain gap is now
    closed in embedding space rather than in audio space.
+7. **A leaked-keyword calibration sample cannot be fixed without ground
+   truth, and the amount of engineering doesn't change that.** Five
+   transcription-free designs were tried (score-range/temporal-burst/EVT
+   excision, fixed-tolerance recalibration, held-chunk adjudication) and
+   all reverted - each fails a different way, but all share the same
+   root cause: a leaked keyword's score is provably indistinguishable
+   from a legitimate hard negative's using score statistics alone, and
+   that indistinguishability gets worse, not better, the more often the
+   keyword recurs. The fix was never a smarter statistic - it was
+   restoring the transcript-based guard the offline pipeline always had,
+   via one cheap one-time whisper-base transcription of just the
+   bootstrap window.
 
 ## Artifact map (post-cleanup, 2026-07-02)
 

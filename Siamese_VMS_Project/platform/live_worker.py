@@ -20,8 +20,13 @@ Architecture: downloading and detection are decoupled.
       invoking the original pipeline scripts as subprocesses):
         keyword_generator.py     TTS prototype anchor + variants
         (bootstrap wait)         until N chunks have arrived from the stream
+        transcribe_chunks.py     transcribe those N chunks (leakage guard
+                                 for calibration - see step 3 below and the
+                                 "Calibration leakage" note further down)
         cohort_builder.py        AS-norm impostor cohort
-        calibrate.py             per-keyword detection threshold
+        calibrate.py             per-keyword detection threshold, using the
+                                 transcript to exclude keyword-bearing
+                                 chunks from its negative sample
       Then the endless live loop: take the next chunk off the queue, scan it
       with the AS-norm detector (50 ms hop - must match the calibration
       window grid), then:
@@ -34,6 +39,19 @@ deleted (or moved to detections/), and the unprocessed backlog is capped -
 if the detector cannot keep up with the stream, the oldest unprocessed
 chunk is dropped (during setup, new segments are skipped instead, so the
 files setup is reading stay stable).
+
+Calibration leakage guard: calibrate.py's threshold is set from a small
+negative sample (the bootstrap chunks); without ground truth, a chunk that
+happens to contain the keyword can end up in that "negative" sample,
+setting the threshold to its own score and guaranteeing a miss - and if
+the keyword recurs often in the stream, no purely statistical fix after
+the fact is reliable (several were tried and reverted - commit 181ea7f,
+reports/EXPERIMENT_LOG.md). Transcribing the bootstrap chunks (one-time,
+setup-only, via transcribe_chunks.py) closes this the same way the
+offline research pipeline always has: calibrate.py's existing
+keyword_free_chunks() guard excludes any chunk whose transcript contains
+the keyword, by content rather than by guessing from scores. The live
+detection path itself never transcribes anything.
 
 Status protocol on stdout (parsed by the GUI):
   @@PHASE <setup|live|error>
@@ -445,6 +463,30 @@ def main():
                    f"from the stream ...")
         while wav_count() < args.bootstrap_chunks:
             time.sleep(2)
+
+    # -- 2.5 Transcribe the bootstrap chunks (leakage guard for calibration) -
+    # calibrate.py's negative sample is drawn from these same chunks with no
+    # ground truth to exclude the keyword's own utterance; an unlucky draw
+    # sets the p100 threshold to that utterance's own score, guaranteeing a
+    # miss (observed live: 'south', 'brain', 'morning', 'mexico' each missed
+    # the very utterance that contaminated its calibration - the last one
+    # recurred often enough that no post-hoc statistic could safely recover
+    # it, see reports/EXPERIMENT_LOG.md). Every transcription-free fix tried
+    # (score-range/temporal-burst/EVT excision, fixed-tolerance
+    # recalibration, held-chunk adjudication - reverted, commit 181ea7f) had
+    # a failure mode; transcribing the bootstrap window lets calibrate.py
+    # reuse the same keyword_free_chunks() guard the offline research
+    # pipeline already relies on, closing the leak by content instead of by
+    # guessing from score statistics. One-time, setup-only - the live
+    # detection path never transcribes. Reused across keywords tested
+    # against the same data root (the transcript is keyword-agnostic).
+    transcript_file = os.path.join(audio_dir, "transcripts.txt")
+    if not os.path.exists(calib_file) and not os.path.exists(transcript_file):
+        run_step("transcribe_chunks.py",
+                 ["--limit", str(args.bootstrap_chunks),
+                  "--out", transcript_file],
+                 f"transcribing the first {args.bootstrap_chunks} bootstrap "
+                 "chunks (one-time, powers the calibration leakage guard)")
 
     # -- 3. Cohort + threshold calibration ----------------------------------
     if not os.path.exists(cohort_file):

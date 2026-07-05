@@ -44,9 +44,11 @@ until you click **Finish**.
 
 **Setup (begins when Start Detection is pressed; first run per keyword is
 slow, and downloading continues throughout):** synthesize the multi-voice
-TTS anchor → wait until ~10 chunks exist on disk → build the AS-norm
-cohort → calibrate the detection threshold. Later runs with the same
-keyword skip all of this.
+TTS anchor → wait until ~10 chunks exist on disk → transcribe those chunks
+(whisper-base, one-time) → build the AS-norm cohort → calibrate the
+detection threshold, using the transcript to exclude any keyword-bearing
+chunk from its negative sample. Later runs with the same keyword (or a new
+keyword against the same downloaded audio) skip whatever's already built.
 
 **Live:** the detector consumes the queue: each chunk is scanned by the
 Siamese AS-norm detector (50 ms hop — must match the calibration window
@@ -59,7 +61,39 @@ grid). For each chunk:
 so disk and memory stay flat during arbitrarily long runs (same
 keep-or-delete policy as the original VMS platform).
 
-The platform ends at detection. `transcribe_chunks.py` and
-`validate_detection.py` are offline research tools for measuring accuracy
-against ground truth — the live product never transcribes stream audio or
-second-guesses a detection; it saves the chunk and moves on.
+The platform ends at detection — it never second-guesses a live match; it
+saves the chunk and moves on. `validate_detection.py` remains an offline
+research tool for measuring accuracy against ground truth, unused by the
+platform. `transcribe_chunks.py` is the one exception on the live side: it
+runs once, on the ~10 bootstrap chunks only, purely so calibration has
+ground truth to exclude the keyword's own utterance from its negative
+sample (see "Calibration leakage guard" below) — the live detection loop
+itself never transcribes anything.
+
+### Calibration leakage guard
+
+Without ground truth, calibrate.py's small bootstrap sample can include a
+chunk that happens to contain the keyword itself, setting the threshold to
+that utterance's own score and guaranteeing a miss for it — and if the
+keyword recurs often in the stream, no purely statistical fix after the
+fact is reliable (several were tried: score-range excision, temporal-burst
+excision, a Generalized Pareto tail fit, fixed-tolerance periodic
+recalibration, held-chunk leave-one-out adjudication — each had a
+different failure mode, most visibly a live 'mexico' session where the
+keyword recurred often enough that the recovery mechanism could only ever
+rescue one occurrence out of many; see `reports/EXPERIMENT_LOG.md`,
+"Calibration leakage without transcripts", and commit `181ea7f` where that
+whole line of attempts was reverted).
+
+The fix restores what the offline research pipeline always relied on:
+`transcribe_chunks.py --limit <bootstrap-chunks>` transcribes the
+bootstrap window once (whisper-base — more accurate than the tiny model
+used elsewhere, since a missed word here silently reintroduces the exact
+leak this exists to prevent), and `calibrate.py`'s existing
+`keyword_free_chunks()` guard excludes every chunk whose transcript
+contains the keyword from the negative sample — correctly, regardless of
+how many times the keyword occurs, unlike any of the reverted statistical
+approaches. Validated end-to-end (real audio + model, not synthetic
+scores): simulating a fresh platform bootstrap on a chunk set where a
+keyword occurs 3 times recovers all 3 with zero false positives, matching
+the offline pipeline's historical result exactly.

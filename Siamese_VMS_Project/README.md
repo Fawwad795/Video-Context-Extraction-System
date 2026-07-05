@@ -116,7 +116,9 @@ $$
   embedded through the **same detector protocol** (chunk context, all scales,
   50 ms grid). Defaults to `--fa-percentile 100 --negatives 40000` (the
   trained-head operating point); negatives are drawn only from chunks that do
-  not contain the keyword (transcript token check).
+  not contain the keyword (transcript token check). The live platform
+  (no pre-existing transcript) produces one itself — see
+  [`platform/README.md`](platform/README.md#calibration-leakage-guard).
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
