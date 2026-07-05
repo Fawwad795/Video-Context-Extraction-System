@@ -40,6 +40,14 @@ if the detector cannot keep up with the stream, the oldest unprocessed
 chunk is dropped (during setup, new segments are skipped instead, so the
 files setup is reading stay stable).
 
+Exception, by design: audios_copy/ (sibling of audios/, not read by any
+pipeline script) gets a standing copy of every chunk as it's downloaded,
+independent of whatever the detector does with the original - a
+manually-browsable record for spot-checking results later. Unlike
+everything else in this list, it is NOT capped or cleaned up - it grows
+for the life of the session; delete it by hand if disk space matters for
+a long-running stream.
+
 Calibration leakage guard: calibrate.py's threshold is set from a small
 negative sample (the bootstrap chunks); without ground truth, a chunk that
 happens to contain the keyword can end up in that "negative" sample,
@@ -157,14 +165,22 @@ class StreamDownloader(threading.Thread):
                          that setup scripts are reading never get deleted;
       setup_mode=False - drop the OLDEST unprocessed chunk (delete its
                          files), keeping the monitor close to live.
+
+    audio_copy_dir (if given) gets a copy of every successfully converted
+    chunk, independent of whatever the detector later does with the
+    original in audio_dir (keep, delete, or hold for adjudication) - a
+    standing, manually-browsable record of everything the stream actually
+    produced, for after-the-fact spot-checking.
     """
 
     def __init__(self, url, video_dir, audio_dir, start_index,
-                 chunk_queue, backlog_cap, max_remember=8192):
+                 chunk_queue, backlog_cap, max_remember=8192,
+                 audio_copy_dir=None):
         super().__init__(daemon=True)
         self.url = url
         self.video_dir = video_dir
         self.audio_dir = audio_dir
+        self.audio_copy_dir = audio_copy_dir
         self.index = start_index
         self.queue = chunk_queue
         self.backlog_cap = backlog_cap
@@ -210,6 +226,12 @@ class StreamDownloader(threading.Thread):
                 if os.path.exists(p):
                     os.remove(p)
             return False
+        if self.audio_copy_dir:
+            try:
+                shutil.copy2(audio_path, os.path.join(
+                    self.audio_copy_dir, os.path.basename(audio_path)))
+            except OSError as e:
+                status(f"audios_copy: failed to copy chunk {idx} ({e})")
         self.index += 1
         self.downloaded += 1
 
@@ -374,10 +396,16 @@ def main():
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
     audio_dir = os.path.join(data_root, "audios")
+    # Standing copy of every downloaded chunk, independent of whatever the
+    # detector does with the original (keep/delete/hold) - a manually
+    # browsable record for later spot-checking. Sibling of audios/, not
+    # inside it, so it's invisible to list_chunk_audios() and every
+    # pipeline script's glob over audio_dir.
+    audio_copy_dir = os.path.join(data_root, "audios_copy")
     video_dir = os.path.join(data_root, "videos")
     kw_dir = os.path.join(data_root, "keywords")
     log_dir = os.path.join(data_root, "logs")
-    for d in (audio_dir, video_dir, kw_dir, log_dir):
+    for d in (audio_dir, audio_copy_dir, video_dir, kw_dir, log_dir):
         os.makedirs(d, exist_ok=True)
 
     sys.path.insert(0, CORE_DIR)
@@ -408,7 +436,8 @@ def main():
     # lost nor exempt from scanning.
     chunk_queue = queue.Queue()
     downloader = StreamDownloader(args.url, video_dir, audio_dir, start_index,
-                                  chunk_queue, args.backlog_cap)
+                                  chunk_queue, args.backlog_cap,
+                                  audio_copy_dir=audio_copy_dir)
     downloader.start()
 
     # -- 0. Wait for the keyword if it was not given up-front ---------------

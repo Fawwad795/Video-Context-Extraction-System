@@ -92,7 +92,11 @@ class PlatformGUI:
         self.view_button = ttk.Button(buttons, text="View Detections",
                                       command=self.open_detections,
                                       style="Stream.TButton")
-        self.view_button.pack(side="left")
+        self.view_button.pack(side="left", padx=(0, 6))
+        self.clear_button = ttk.Button(buttons, text="Clear Console",
+                                       command=self.clear_console,
+                                       style="Stream.TButton")
+        self.clear_button.pack(side="left")
         self.queue_label = ttk.Label(frame, text="Backlog: 0",
                                      style="Stream.TLabel")
         self.queue_label.grid(row=3, column=3, pady=8, sticky="w")
@@ -211,6 +215,13 @@ class PlatformGUI:
         self.detect_button.config(state="normal")
         self.finish_button.config(state="disabled")
         self.word_entry.config(state="normal")
+
+    def clear_console(self):
+        """Clears only the on-screen console - the session log file on disk
+        (platform/data/logs/session_*.log) keeps the full record either way."""
+        self.log_text.config(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.config(state="disabled")
 
     def open_detections(self):
         keyword = self.word_entry.get().strip().lower()

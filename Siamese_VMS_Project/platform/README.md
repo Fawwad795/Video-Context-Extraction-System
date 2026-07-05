@@ -10,6 +10,9 @@ project's `vms.py`. Downloading and detection start independently:
   the keyword artifacts and starts scanning — including the chunks that
   arrived while the keyword was being decided.
 - **Finish** — stops the session.
+- **View Detections** — opens the saved-chunks folder for the current keyword.
+- **Clear Console** — clears the on-screen log only; the full session
+  transcript still accumulates on disk at `data/logs/session_*.log`.
 
 ```
 python platform/gui.py
@@ -30,6 +33,10 @@ platform/
     keywords/       TTS variants, anchor, cohort, calibration -
                     built once per keyword, reused after
     audios/ videos/ transient chunk files (deleted after analysis)
+    audios_copy/    standing copy of every downloaded chunk - NOT cleaned
+                    up, grows for the life of the session; for manually
+                    spot-checking results later, untouched by any
+                    pipeline script (see "Flow" below)
     logs/           session logs + per-keyword detection log
     detections/<keyword>/   saved chunks: .mp4 + .wav + .json record
 ```
@@ -40,7 +47,11 @@ platform/
 a dedicated downloader thread polls the stream playlist and fetches every
 new segment (dedup by URI path — YouTube re-signs query strings — plus
 content md5), converts it to audio, and queues it for the detector. It runs
-until you click **Finish**.
+until you click **Finish**. Every converted chunk is also copied to
+`data/audios_copy/` at this point, before the detector has any chance to
+delete or move the original — a standing archive you can browse by hand,
+independent of the keep-or-delete policy below. Unlike the rest of the
+platform's data, this folder is not cleaned up automatically.
 
 **Setup (begins when Start Detection is pressed; first run per keyword is
 slow, and downloading continues throughout):** synthesize the multi-voice
