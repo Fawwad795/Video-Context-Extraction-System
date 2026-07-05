@@ -344,6 +344,43 @@ def list_chunk_audios(audio_dir=AUDIO_DIR):
     return files
 
 
+def spoken_numbers(text):
+    """Rewrite digit runs in ASR output as spelled-out words.
+
+    Whisper (and similar models) render spoken numbers in normal written
+    orthography ("2026", "50") rather than as the literal words that were
+    actually spoken, even though nothing but words was ever said. Every
+    consumer of a transcript here does word-token matching (this file's
+    keyword_free_chunks, pipeline/validate_detection.py) via a
+    letters-only regex - a keyword that is itself a number word (e.g.
+    "seven") would silently fail to match a transcript containing "7",
+    reintroducing exactly the leakage this transcription exists to
+    prevent. Applied once at transcription time so every downstream
+    consumer just sees words; requires num2words (pip install num2words).
+    """
+    import re
+
+    from num2words import num2words
+
+    def replace(m):
+        s = m.group(0)
+        if "." in s:
+            whole, frac = s.split(".", 1)
+            words = num2words(int(whole)) if whole else "zero"
+            digit_words = " ".join(num2words(int(d)) for d in frac)
+            return f"{words} point {digit_words}"
+        ordinal = re.match(r"^(\d+)(st|nd|rd|th)$", s, re.IGNORECASE)
+        if ordinal:
+            return num2words(int(ordinal.group(1)), to="ordinal")
+        return num2words(int(s))
+
+    # Join comma-grouped thousands ("2,026" -> "2026") so they convert as
+    # one number instead of fragmenting at the comma.
+    text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
+    return re.sub(r"\d+\.\d+|\d+(?:st|nd|rd|th)?", replace, text,
+                 flags=re.IGNORECASE)
+
+
 def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
     """Live chunks whose transcript does not contain the keyword.
 

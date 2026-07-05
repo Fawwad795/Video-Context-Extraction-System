@@ -209,7 +209,9 @@ def main():
     ui.kv("embeddings averaged", len(centroid_audio))
     ui.kv("detection window", f"{window_samples / SAMPLE_RATE:.2f}s")
     ui.done(os.path.relpath(out_path, PROJECT_ROOT), t0)
-    ui.item("next: python pipeline/cohort_builder.py")
+    ui.item("next: python pipeline/cohort_builder.py "
+           "(transcribe_chunks.py first if you haven't yet - powers "
+           "calibrate.py's leakage guard)")
 
 
 if __name__ == "__main__":

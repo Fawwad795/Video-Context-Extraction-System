@@ -20,7 +20,7 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 import console as ui
-from scoring import PROJECT_ROOT, list_chunk_audios
+from scoring import PROJECT_ROOT, list_chunk_audios, spoken_numbers
 
 warnings.filterwarnings("ignore")
 
@@ -61,7 +61,7 @@ def main():
     print("   " + "-" * 74)
     for audio_file in audio_files:
         name = os.path.basename(audio_file)
-        text = asr(audio_file)["text"].lower()
+        text = spoken_numbers(asr(audio_file)["text"]).lower()
         tokens = set(re.findall(r"[a-z']+", text))
         truth = keyword in tokens
         pred = predicted.get(name, False)
