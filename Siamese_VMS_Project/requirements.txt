@@ -1,0 +1,27 @@
+# Siamese VMS pipeline dependencies (core/, pipeline/, platform/, training/).
+# Versions pinned to what this project is validated against; a compatible
+# newer release of any package will likely work but hasn't been tested.
+#
+# First run needs internet access even with everything installed: models
+# (wavlm-base-plus, whisper-base, speecht5_tts/hifigan, the cmu-arctic-
+# xvectors dataset) must be downloaded into the Hugging Face cache once.
+# core/scoring.py defaults HF_HUB_OFFLINE=1 (etc.) for every run after
+# that, so a first-time clone should do its first pipeline run with those
+# unset, e.g.: HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python pipeline/keyword_generator.py --keyword test
+
+torch==2.10.0
+transformers==5.10.1
+datasets==3.6.0
+librosa==0.11.0
+soundfile==0.13.1
+numpy==1.26.4
+scipy==1.17.1
+num2words==0.5.14
+
+# Live platform (platform/) + downloader.py only
+streamlink==8.4.0
+m3u8==6.0.0
+moviepy==2.2.1
+
+# training/ only (phonetic-confusable batch sampling)
+g2p_en==2.1.0

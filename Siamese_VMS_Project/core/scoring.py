@@ -72,9 +72,14 @@ except Exception:
 # (keywords/, audios/, logs/) into a different data root - used by platform/
 # so its runtime artifacts never land in the research folders.
 PROJECT_ROOT = os.environ.get("SIAMESE_PROJECT_ROOT", os.path.dirname(CORE_DIR))
-# Override with the SIAMESE_WEIGHTS env var to A/B different checkpoints
+# Override with the SIAMESE_WEIGHTS env var to A/B different checkpoints.
+# Default is the BASELINE backend's own checkpoint (siamese_v1_best.pth,
+# core/siamese_model.py's SiameseAudioModel) - was wrongly defaulting to
+# siamese_v3_best.pth (the wavlm-trained attentive head's checkpoint, a
+# different architecture entirely; load_weights() would raise loading it
+# into SiameseAudioModel's projection head).
 WEIGHTS_PATH = os.environ.get(
-    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "siamese_v3_best.pth"))
+    "SIAMESE_WEIGHTS", os.path.join(PROJECT_ROOT, "checkpoints", "siamese_v1_best.pth"))
 # Override with SIAMESE_AUDIO_DIR to score against preprocessed audio
 AUDIO_DIR = os.environ.get("SIAMESE_AUDIO_DIR", os.path.join(PROJECT_ROOT, "audios"))
 SAMPLE_RATE = 16000

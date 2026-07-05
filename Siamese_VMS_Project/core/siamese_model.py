@@ -10,7 +10,13 @@ class SiameseAudioModel(nn.Module):
         super(SiameseAudioModel, self).__init__()
         print(f"Loading pre-trained backbone ({model_name}) for Siamese Network...")
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
-        self.backbone = Wav2Vec2Model.from_pretrained(model_name, use_safetensors=True)
+        try:
+            self.backbone = Wav2Vec2Model.from_pretrained(model_name)
+        except (ValueError, OSError):
+            # transformers blocks torch.load .bin checkpoints on torch < 2.6
+            # (CVE-2025-32434); fall back to a safetensors copy if the cached
+            # revision has one (same pattern as core/embedders.py's FrameBackend).
+            self.backbone = Wav2Vec2Model.from_pretrained(model_name, use_safetensors=True)
         
         # We freeze the backbone to act as a pure feature extractor
         for param in self.backbone.parameters():

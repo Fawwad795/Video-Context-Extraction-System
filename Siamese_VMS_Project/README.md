@@ -19,6 +19,48 @@ recording, no live ASR pass, no retraining per stream.
 For a GUI that monitors a YouTube URL in real time, see
 [`platform/README.md`](platform/README.md) (`python platform/gui.py`).
 
+## Setup
+
+```bash
+cd Siamese_VMS_Project
+pip install -r requirements.txt
+```
+
+Python 3.11 validated (see `requirements.txt` for exact package versions).
+`moviepy` pulls in `imageio-ffmpeg`, which bundles its own ffmpeg binary —
+no separate system ffmpeg install needed.
+
+**Model checkpoints are already in this repo** (`checkpoints/*.pth`, a few
+MB each) — the pipeline runs immediately with no training step. The
+"Model Training" section further down documents how they were produced,
+not something you need to redo.
+
+**First run needs internet access**, even with every package installed:
+`core/scoring.py` defaults `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` /
+`HF_DATASETS_OFFLINE=1` for every run, so that a flaky connection can't
+break a load of an already-cached model — but on a machine with nothing
+cached yet, that same default makes the *first* run fail outright trying
+to reach Hugging Face while offline. Do the first pipeline command with
+those disabled, then leave them on afterward:
+```bash
+# Windows PowerShell
+$env:HF_HUB_OFFLINE = "0"; $env:TRANSFORMERS_OFFLINE = "0"; $env:HF_DATASETS_OFFLINE = "0"
+python pipeline/keyword_generator.py --keyword test
+```
+```bash
+# bash
+HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python pipeline/keyword_generator.py --keyword test
+```
+This downloads SpeechT5 (TTS + HiFi-GAN), the CMU ARCTIC x-vectors dataset,
+and WavLM into the local cache (~1-2 GB total); every run after that can
+go back to the offline default.
+
+**No audio is bundled in this repo** — `audios/Chunkset_D|E|F/transcripts.txt`
+are kept as historical ground truth for the results below, but the
+matching `.wav` chunks are not (large binary, and a live stream's content
+isn't reproducible on demand anyway). Run `pipeline/downloader.py` to
+pull your own chunks before anything else in the Usage Guide below.
+
 ## Why This Is Hard (The Core Problem)
 
 Raw TTS compared directly to human speech mostly fails: a synthetic voice and
@@ -167,13 +209,13 @@ Set these before running the pipeline (PowerShell example):
 
 ```powershell
 $env:SIAMESE_BACKEND = "wavlm-trained"
-$env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
+$env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
 ```
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `SIAMESE_BACKEND` | `baseline` | `wavlm-trained` (production), `wavlm`, or `baseline` |
-| `SIAMESE_WEIGHTS` | `checkpoints/siamese_v3_best.pth` | Checkpoint for baseline backend |
+| `SIAMESE_WEIGHTS` | `checkpoints/siamese_v1_best.pth` | Checkpoint for the `baseline` backend only - **not** read by `wavlm-trained` |
 | `SIAMESE_V3_WEIGHTS` | `checkpoints/siamese_v3_best.pth` | Attentive-head weights for `wavlm-trained` |
 | `SIAMESE_PROJECT_ROOT` | project root | Redirect all data paths (used by `platform/`) |
 | `SIAMESE_AUDIO_DIR` | `audios/` | Chunk set to score against (e.g. `audios/Chunkset_E`) |
@@ -233,7 +275,7 @@ Run from the project root. Pass `--keyword` explicitly (or create
 ```powershell
 cd Siamese_VMS_Project
 $env:SIAMESE_BACKEND = "wavlm-trained"
-$env:SIAMESE_WEIGHTS = "checkpoints/siamese_v3_best.pth"
+$env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
 ```
 
 1. **Download stream chunks** (content-hash dedup):
