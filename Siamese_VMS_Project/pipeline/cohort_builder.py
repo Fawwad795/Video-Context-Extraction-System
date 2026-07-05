@@ -103,15 +103,6 @@ def main():
     ui.step(f"embedding {len(cohort_audio)} cohort clips ...")
     embeddings = embed_batch(model, cohort_audio)
 
-    # No transcription-free leakage guard here (unlike calibrate.py's EVT
-    # threshold): a per-window "does this look like the keyword" test was
-    # tried and rejected empirically - it misidentifies genuine hard
-    # negatives as leaks in real, keyword-free data (see
-    # core/scoring.evt_threshold's docstring). Residual risk is small: a
-    # leaked cohort window only nudges AS-norm's mean/std (mu_a/sd_a over
-    # top_k, here effectively the whole 50-window cohort), not a hard
-    # cutoff, and only 1 of 50 draws would need to land on the exact
-    # keyword moment.
     out_path = cohort_path(keyword)
     np.savez(out_path, embeddings=embeddings.astype(np.float32),
              n_stream=np.int64(n_stream), n_tts=np.int64(n_tts))
