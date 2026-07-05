@@ -53,7 +53,16 @@ class PlatformGUI:
         frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        frame.columnconfigure(3, weight=1)
+        # Columns 0/2 (labels) get no weight so they stay snug against their
+        # entries; columns 1/3 (entries) absorb all extra width - including
+        # the width the row-3 button strip needs beyond columns 0-2's own
+        # content, which Tk would otherwise split evenly across 0/1/2
+        # (its default when none of a spanning widget's columns have
+        # weight), visibly shoving the right-aligned labels rightward.
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=0)
+        frame.columnconfigure(3, weight=2)
         frame.rowconfigure(6, weight=1)
 
         ttk.Label(frame, text="Siamese Keyword Spotting - Live Stream Monitor",
@@ -68,7 +77,7 @@ class PlatformGUI:
         ttk.Label(frame, text="Search Word:", style="Stream.TLabel"
                   ).grid(row=2, column=0, padx=5, pady=5, sticky="e")
         self.word_entry = ttk.Entry(frame, width=24)
-        self.word_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        self.word_entry.grid(row=2, column=1, padx=5, pady=5, sticky="we")
 
         ttk.Label(frame, text="URL:", style="Stream.TLabel"
                   ).grid(row=2, column=2, padx=5, pady=5, sticky="e")
