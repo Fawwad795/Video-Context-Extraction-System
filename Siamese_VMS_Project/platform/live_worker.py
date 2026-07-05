@@ -35,6 +35,30 @@ if the detector cannot keep up with the stream, the oldest unprocessed
 chunk is dropped (during setup, new segments are skipped instead, so the
 files setup is reading stay stable).
 
+Periodic recalibration: the bootstrap calibration is a small, one-shot
+sample (~10 chunks, ~50s of audio) with no transcripts to exclude a chunk
+that happens to contain the keyword - an unlucky draw sets the threshold
+to that utterance's own score, guaranteeing a miss for it (and similar
+future ones). No per-window statistical test can safely detect this after
+the fact (tried and rejected - see core/scoring.evt_threshold's
+docstring): a genuine hard negative and a leaked keyword utterance can be
+statistically indistinguishable in a small sample.
+
+The fix is NOT "grow the sample and take the max again" - a literal max
+can only stay flat or rise as more data arrives, so one leaked point stays
+its ceiling forever no matter how much clean data piles up afterward
+(verified numerically before shipping this). Every scan already computes
+AS-norm scores for every window of every chunk, so process_chunk feeds
+those scores (from chunks that did NOT trigger a detection - never from a
+chunk currently believed to contain the keyword) into a growing, capped
+pool, and every --recalib-interval-seconds the threshold is refit by
+excluding a small fixed number of the pool's most extreme points
+(--recalib-tolerance) before taking the max. A one-off leak occupies
+exactly one of those excluded slots once the pool has grown past it,
+recovering the clean ceiling - at the honest cost of also tolerating that
+many genuinely extreme hard negatives per pool, rather than the bootstrap
+sample's strict (but small-sample-fragile) zero-false-alarm guarantee.
+
 Status protocol on stdout (parsed by the GUI):
   @@PHASE <setup|live|error>
   @@STATUS <one-line status>
@@ -53,6 +77,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections import deque
 from datetime import datetime
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -317,7 +342,8 @@ def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
     best = int(np.argmax(normed))
     return {"detections": detections,
             "best_score": float(normed[best]), "best_time": float(times[best]),
-            "best_scale": float(win_scales[best])}
+            "best_scale": float(win_scales[best]),
+            "all_scores": normed}  # for the recalibration pool - see main()
 
 
 # --------------------------------------------------------------------------
@@ -338,6 +364,24 @@ def main():
                     help="chunks needed up-front for cohort/calibration")
     ap.add_argument("--backlog-cap", type=int, default=300,
                     help="max unprocessed chunks kept on disk before dropping")
+    ap.add_argument("--recalib-interval-seconds", type=int, default=300,
+                    help="how often to refit the threshold from live-"
+                         "observed scores (see 'Periodic recalibration' "
+                         "below); 0 disables it")
+    ap.add_argument("--recalib-min-pool", type=int, default=2000,
+                    help="minimum accumulated window scores before the "
+                         "first recalibration fires")
+    ap.add_argument("--recalib-pool-cap", type=int, default=100_000,
+                    help="max window scores kept in the recalibration "
+                         "pool (oldest dropped first - bounds memory)")
+    ap.add_argument("--recalib-tolerance", type=int, default=5,
+                    help="number of the pool's most extreme scores "
+                         "excluded before taking the max (NOT the "
+                         "bootstrap's literal p100 - see maybe_recalibrate "
+                         "for why growing the pool alone can't fix a "
+                         "literal max; this tolerates up to K extreme "
+                         "hard negatives in exchange for actually "
+                         "recovering from a leaked keyword)")
     args = ap.parse_args()
 
     keyword = args.keyword.strip().lower() if args.keyword else None
@@ -469,12 +513,63 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
+    recalib_pool = deque(maxlen=args.recalib_pool_cap)
+    last_recalib = time.monotonic()
+
     # -- 5. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
     emit("PHASE", "live")
     live_log = os.path.join(log_dir, f"live_{keyword}.txt")
     total_detected = 0
     emit("DETECT", "0")
+
+    def maybe_recalibrate():
+        """Refit the threshold from the growing live-score pool.
+
+        See the module docstring's "Periodic recalibration" section: this
+        is what actually protects a long-running session against the
+        bootstrap sample's one-shot leakage risk, since no per-window
+        statistical test can reliably tell a leaked keyword utterance
+        apart from a legitimate hard negative in a small sample.
+
+        Deliberately NOT the bootstrap's literal p100 (verified numerically
+        before shipping this - see the experiment log's "periodic
+        recalibration" entry): p100 is the sample maximum, which can only
+        stay flat or increase as more data arrives, so a single leaked
+        point that entered the pool once remains its ceiling FOREVER no
+        matter how much clean data piles up afterward - growing the pool
+        alone does not fix p100. What actually recovers the clean value is
+        excluding a small fixed number of the pool's most extreme points
+        (--recalib-tolerance, K) before taking the max: a genuine one-off
+        leak occupies exactly one of those K slots and gets excluded once
+        there are at least K other points in the pool (trivial almost
+        immediately), while the K-tolerant percentile still converges to
+        the true clean ceiling. The cost is real and worth stating
+        plainly: up to K legitimately-extreme hard negatives per pool are
+        now tolerated rather than guaranteed zero false alarms - the
+        bootstrap calibration's strict p100 guarantee only ever applied to
+        that first small sample anyway.
+        """
+        nonlocal threshold, threshold_desc, last_recalib
+        if args.recalib_interval_seconds <= 0:
+            return
+        if time.monotonic() - last_recalib < args.recalib_interval_seconds:
+            return
+        last_recalib = time.monotonic()
+        if len(recalib_pool) < args.recalib_min_pool:
+            return
+        pool = np.fromiter(recalib_pool, dtype=np.float64)
+        pct = 100.0 * (1.0 - args.recalib_tolerance / len(pool))
+        new_threshold = float(np.percentile(pool, pct)) + 1e-4
+        old = threshold
+        threshold = new_threshold
+        threshold_desc = f"recalibrated on {len(pool)} live scores"
+        msg = (f"Recalibrated: threshold {old:.3f} -> {threshold:.3f} "
+               f"(top {args.recalib_tolerance} of {len(pool)} live-observed "
+               f"scores excluded)")
+        with open(live_log, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
+        status(msg)
 
     def process_chunk(video_path, audio_path):
         nonlocal total_detected
@@ -486,6 +581,13 @@ def main():
                           threshold, SAMPLE_RATE, DEFAULT_TOP_K)
         del y
         detections = scan["detections"] if scan is not None else []
+
+        # Feed the recalibration pool from every chunk EXCEPT one currently
+        # believed to contain the keyword - never reinforce the very
+        # threshold that decided this chunk (see maybe_recalibrate above).
+        if scan is not None and not detections:
+            recalib_pool.extend(scan["all_scores"].tolist())
+        maybe_recalibrate()
 
         if detections:
             total_detected += len(detections)

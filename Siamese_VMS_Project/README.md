@@ -115,8 +115,20 @@ $$
 - **Threshold:** `pipeline/calibrate.py` — max score on keyword-free windows
   embedded through the **same detector protocol** (chunk context, all scales,
   50 ms grid). Defaults to `--fa-percentile 100 --negatives 40000` (the
-  trained-head operating point); negatives are drawn only from chunks that do
-  not contain the keyword (transcript token check).
+  trained-head operating point).
+- **Leakage guards** (a spoken keyword inside the "negative" sample would set
+  the p100 threshold to its own score + ε, guaranteeing a miss): research
+  runs exclude keyword-bearing chunks via the transcript token check.
+  Deployment has no transcripts, and — after three per-sample statistical
+  fixes were tried and rejected (`reports/EXPERIMENT_LOG.md`, "Calibration
+  leakage without transcripts": score-range and temporal-burst excision
+  both regressed clean calibration, and even a rigorous extreme-value tail
+  fit agreed a leaked score can be statistically unremarkable) — the fix
+  lives in `platform/live_worker.py` instead: periodic recalibration on a
+  growing pool of live-observed scores, excluding a small fixed number of
+  its most extreme points (not the bootstrap's literal p100, which cannot
+  recover no matter how much data accumulates). See
+  [`platform/README.md`](platform/README.md).
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,

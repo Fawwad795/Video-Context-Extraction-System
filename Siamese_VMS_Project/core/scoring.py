@@ -238,6 +238,80 @@ def sample_stream_window_embeddings(model, window_samples, n_windows, rng,
     return l2_normalize(allw[idx])
 
 
+def evt_threshold(scores, fa_percentile, tail_frac=0.05, min_exceedances=50):
+    """Transcription-free leakage-robust calibration threshold (peaks-over-
+    threshold extreme value theory), replacing a raw max()/percentile.
+
+    Deployment has no transcripts, so 'negative' windows sampled from live
+    stream audio may include an actual keyword utterance. Reading the
+    threshold directly off the empirical max (as the raw p100 protocol
+    does) is the problem, not just the leak: max() has breakdown point
+    zero - ANY single sample point, by itself, fully determines it. That
+    single point being a leaked keyword utterance (observed: 'south' on
+    the live platform, threshold 4.3852 set by its own score 4.3851) or an
+    unusually strong hard negative are statistically indistinguishable
+    from the score alone, and no per-window test can reliably tell them
+    apart (two designs tried and rejected here empirically - score-vs-
+    positives ranges and temporal-burst clustering both regressed
+    leak-free oracle runs by misidentifying genuine hard negatives as
+    excision candidates, because any single strongly-matching acoustic
+    moment - keyword or confusable - produces the same statistical
+    signature). The fix is to stop trusting a single point at all.
+
+    Peaks-over-threshold: fit a Generalized Pareto Distribution to the
+    excesses over a moderate percentile (tail_frac, e.g. the top 5%), then
+    read the target quantile off the FITTED tail rather than the raw
+    empirical extreme. The fit pools many tail points, so one point -
+    whatever it is - has only modest leverage over the shape/scale
+    parameters, instead of being the entire answer.
+
+    Falls back to the raw percentile + epsilon (the original protocol) if
+    there are too few exceedances to fit reliably, or if the fit puts the
+    target quantile below the raw percentile anyway (nothing to correct).
+
+    Returns (threshold, diagnostics dict).
+    """
+    from scipy.stats import genpareto
+
+    s = np.asarray(scores, dtype=float)
+    n = len(s)
+    raw = float(np.percentile(s, fa_percentile)) + 1e-4
+    p_target = (100.0 - fa_percentile) / 100.0 if fa_percentile < 100 else 1.0 / n
+
+    u = float(np.percentile(s, 100.0 * (1.0 - tail_frac)))
+    exceed = s[s > u] - u
+    info = {"method": "raw", "raw_threshold": raw, "u": u,
+           "n_exceedances": int(len(exceed)), "p_target": p_target}
+
+    if len(exceed) < min_exceedances:
+        info["reason"] = f"only {len(exceed)} exceedances (need {min_exceedances})"
+        return raw, info
+
+    p_u = len(exceed) / n
+    if p_target >= p_u:
+        # Target rarity is inside the empirical tail already - no
+        # extrapolation needed, the ordinary percentile is fine as-is.
+        info["reason"] = "target quantile within the empirical tail"
+        return raw, info
+
+    try:
+        shape, _, scale = genpareto.fit(exceed, floc=0.0)
+    except Exception as e:
+        info["reason"] = f"GPD fit failed: {e}"
+        return raw, info
+
+    ratio = p_target / p_u
+    if abs(shape) < 1e-6:
+        y = -scale * np.log(ratio)
+    else:
+        y = (scale / shape) * (ratio ** (-shape) - 1.0)
+    evt = float(u + y) + 1e-4
+
+    info.update({"method": "evt", "shape": float(shape), "scale": float(scale),
+                "evt_threshold": evt})
+    return evt, info
+
+
 def topk_stats(scores, top_k):
     k = min(top_k, len(scores))
     top = np.partition(scores, -k)[-k:]

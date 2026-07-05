@@ -63,3 +63,23 @@ The platform ends at detection. `transcribe_chunks.py` and
 `validate_detection.py` are offline research tools for measuring accuracy
 against ground truth — the live product never transcribes stream audio or
 second-guesses a detection; it saves the chunk and moves on.
+
+Because there are no transcripts, calibration cannot exclude keyword-bearing
+bootstrap chunks by label — a keyword spoken during the ~10-chunk bootstrap
+window can end up in its own "negative" sample, setting the threshold to
+its own score and guaranteeing a miss (the "south" bug). No per-window
+statistic can safely detect and remove this after the fact (three
+approaches tried and rejected — see `reports/EXPERIMENT_LOG.md`,
+"Calibration leakage without transcripts"; a rigorous extreme-value fit
+even agrees a leaked score is statistically unremarkable against a
+legitimate hard negative). Instead, **periodic recalibration**: every scan
+already computes AS-norm scores for every window, so `live_worker.py`
+feeds those scores — from chunks that did NOT trigger a detection — into a
+growing, capped pool (`--recalib-pool-cap`, default 100k), and every
+`--recalib-interval-seconds` (default 300s) refits the threshold by
+excluding a small fixed number of the pool's most extreme points
+(`--recalib-tolerance`, default 5) before taking the max — deliberately
+**not** the bootstrap's literal p100, which can only rise as the pool
+grows and would keep any one-off leak as its ceiling forever. The cost is
+honest: up to that many genuinely extreme hard negatives per pool are now
+tolerated, in exchange for actually recovering from a leaked keyword.

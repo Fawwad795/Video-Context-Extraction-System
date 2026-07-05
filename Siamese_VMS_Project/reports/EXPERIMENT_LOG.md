@@ -250,6 +250,104 @@ knnvc_ablation.py) is preserved on the **`archive/knnvc-pipeline`** branch.
 Historical rows above that say "kNN-VC converted" record runs made while
 the stage was active.
 
+## Calibration leakage without transcripts (2026-07-05)
+
+**Bug.** The live platform's bootstrap calibration (`calibrate.py`, ~10
+chunks / ~50s of audio, no transcripts) sampled a chunk that happened to
+contain the keyword ("south") as a "negative." Since fa_percentile=100
+sets the threshold to the single highest-scoring negative window + ε,
+the threshold got set to that utterance's own score - guaranteeing the
+detector missed it: `threshold=4.3852` vs the true window at `4.3851`.
+Reproduced deliberately: with `--all-chunks` (no transcript exclusion) on
+Chunkset D, **every** keyword tested (south, scotland) misses **100%** of
+its true chunks (TP=0) the same way - this isn't specific to "south"; it
+is the guaranteed, mechanical consequence of p100 calibration whenever the
+keyword is present in its own negative sample.
+
+**Three statistical per-sample fixes were tried and rejected, in order:**
+
+1. **Score-in-positive-range excision** (a "negative" window scoring
+   inside the TTS-positive range is probably the keyword). Using the 10th
+   percentile of the ~12 TTS positives as the reference was too strict -
+   with n=12, percentile interpolation jumped to 4.47 (above the leaked
+   negative at 4.20) because the one weak positive (3.59) got interpolated
+   away with its higher neighbor. Using the raw minimum instead was too
+   loose - it also flagged legitimate hard negatives in leak-free
+   (transcript-guarded) runs, regressing `south`/`hope` oracle F1 from
+   1.00 to 0.67/0.40 with new false positives.
+2. **Temporal-burst clustering** (a genuine utterance activates many
+   overlapping sliding windows across ~0.3-1s and 3 scales; an isolated
+   spike doesn't). A fixed z-score bar (z≥2.5) for burst candidates turned
+   out to be roughly the *expected* sample maximum for n in the thousands
+   (verified: synthetic N(0,1), n=3000, expected max z≈3.1-3.8), so it
+   flagged almost everything; a rank-based top-1% candidate set fixed
+   that specific issue but still regressed leak-free oracle runs, because
+   sliding-window overlap means ANY sufficiently strong moment - keyword
+   or an equally-strong confusable - produces the same clustering
+   signature. Burst structure doesn't encode *which word* was spoken.
+3. **Generalized Pareto tail fit** (`scoring.evt_threshold`, peaks-over-
+   threshold EVT): fit the negative tail's shape from many points instead
+   of trusting the single empirical max, hoping the fitted model would
+   flag the leaked point as inconsistent with its neighbors. It didn't:
+   for `south`'s actual leaked negative pool, the fitted GPD predicted the
+   natural 1-in-3444 extreme value should be *higher* than the observed
+   leaked score (4.49 and 4.39 fitted vs 3.60 and 4.20 raw, oracle and
+   deploy respectively) - i.e. a rigorous tail model agrees the leaked
+   score is statistically unremarkable for this distribution. This is the
+   most informative negative result: it shows the leaked instance and a
+   legitimate extreme hard negative are not just hard to tell apart with
+   a specific heuristic - they are **not distinguishable from the score
+   distribution at all**, by any per-sample statistic, because that's
+   exactly the geometric property (confusable words scoring close to true
+   positives) that makes p100 the right calibration rule in the first
+   place. `evt_threshold` is kept in `core/scoring.py`, opt-in via
+   `calibrate.py --evt-threshold`, as a documented negative result and a
+   generally more principled (if unproven-here) alternative estimator -
+   not the default, since it wasn't validated to preserve the other
+   keywords' F1 1.00 results end-to-end.
+
+**What actually works: don't filter the sample, grow it - correctly.**
+The bootstrap threshold is a one-shot statistic from a tiny sample; a
+single unlucky draw can only be diluted by more data, not detected and
+removed after the fact. But growing the pool and re-taking the literal
+`p100` **does not help**: max() can only stay flat or rise as more data
+arrives, so a leaked point that entered once remains the ceiling forever
+regardless of how much clean data piles up after it (verified
+numerically: bootstrap-resampling the *whole* pool - which duplicates the
+leak proportionally to N - keeps p100 stuck, and even a "top-K excluded"
+percentile fails the same way if K copies of the leak can appear by
+resampling). The correct model treats the leak as occurring **exactly
+once** (real deployment never replays a chunk) while the rest of the pool
+grows from genuinely new draws; under that model, excluding a small fixed
+number of the pool's top extreme points before taking the max (K=5)
+recovers the clean threshold almost immediately and stays stable as the
+pool keeps growing (synthetic check on `south`'s real score distributions:
+contaminant 3.2355 vs clean-oracle ceiling 3.0823 - recalibrated value
+converges to 3.0823-3.0824 from pool size 2000 up through 100000).
+
+Implemented in `platform/live_worker.py`: `scan_chunk` now also returns
+every window's AS-norm score; `process_chunk` feeds those scores (from
+chunks that did NOT trigger a detection - never from a chunk currently
+believed to contain the keyword) into a capped, growing pool
+(`--recalib-pool-cap`, default 100k, oldest evicted first), and every
+`--recalib-interval-seconds` (default 300s) the threshold is refit as
+`percentile(pool, 100*(1 - K/len(pool)))` for `--recalib-tolerance`
+K=5 (default), not the bootstrap's literal p100. The honest cost: up to K
+genuinely-extreme hard negatives per pool are now tolerated rather than
+the bootstrap sample's strict zero-false-alarm guarantee - unavoidable,
+since no per-sample statistic can tell them apart from a leaked keyword.
+
+**End-to-end validation** (`scan_chunk` directly, not just synthetic
+score arrays): loaded `south`'s real contaminated bootstrap calibration
+(threshold 3.2356, from the deliberately-reproduced Chunkset D bug above),
+confirmed the miss on `live_6.wav` (its true chunk: "...the **south** of
+Ireland can expect a few showers") - 0 detections, best score 3.2355, one
+epsilon below threshold. Fed ~27k scores from 39 other real chunks (Sets
+D/E/F, replayed to build volume) into the pool, recalibrated per the
+formula above: threshold dropped to 3.1930. Rescanning the same
+`live_6.wav` under the new threshold: **2 detections, best score 3.2355 -
+recovered.**
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
@@ -281,6 +379,14 @@ the stage was active.
    confusable-pair case (administration/immigration) that finding 2's fix
    existed for. Retired 2026-07-04 (section above); the domain gap is now
    closed in embedding space rather than in audio space.
+7. **A leaked-keyword calibration sample cannot be fixed by any per-sample
+   statistic.** Score-range, temporal-burst, and GPD-tail-fit excision were
+   all tried and rejected (section above) - a rigorous extreme-value fit
+   even agrees the leaked score is statistically unremarkable. The fix had
+   to change the *estimator's growth property*, not add a smarter filter:
+   periodic recalibration with a small fixed exceedance tolerance (K=5),
+   never the bootstrap's literal p100 (which cannot recover regardless of
+   how much data piles up - verified numerically before shipping).
 
 ## Artifact map (post-cleanup, 2026-07-02)
 
