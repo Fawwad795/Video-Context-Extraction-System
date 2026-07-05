@@ -48,16 +48,28 @@ The fix is NOT "grow the sample and take the max again" - a literal max
 can only stay flat or rise as more data arrives, so one leaked point stays
 its ceiling forever no matter how much clean data piles up afterward
 (verified numerically before shipping this). Every scan already computes
-AS-norm scores for every window of every chunk, so process_chunk feeds
+AS-norm scores for every window of every chunk, so LiveScanner feeds
 those scores (from chunks that did NOT trigger a detection - never from a
 chunk currently believed to contain the keyword) into a growing, capped
-pool, and every --recalib-interval-seconds the threshold is refit by
-excluding a small fixed number of the pool's most extreme points
-(--recalib-tolerance) before taking the max. A one-off leak occupies
-exactly one of those excluded slots once the pool has grown past it,
-recovering the clean ceiling - at the honest cost of also tolerating that
-many genuinely extreme hard negatives per pool, rather than the bootstrap
-sample's strict (but small-sample-fragile) zero-false-alarm guarantee.
+pool, and the threshold is refit by excluding a small fixed number of the
+pool's most extreme points (--recalib-tolerance) before taking the max -
+first as soon as the pool reaches --recalib-min-pool, then every
+--recalib-interval-seconds. A one-off leak occupies one of the excluded
+slots once the pool has grown past it, recovering the clean ceiling - at
+the honest cost of also tolerating that many genuinely extreme hard
+negatives per pool, rather than the bootstrap sample's strict (but
+small-sample-fragile) zero-false-alarm guarantee.
+
+Held chunks close the remaining sequencing hole: the chunks most at risk
+of a wrong no-match verdict are the bootstrap-era ones scanned right after
+setup - exactly the audio whose keyword utterance may have contaminated
+the calibration - and deleting them on first judgment made the error
+unrecoverable (observed twice: 'south', then 'brain', each missing its own
+calibration-contaminating utterance by one epsilon). Until the first
+recalibration, no-match chunks are therefore held on disk with their
+window scores kept in memory, then re-judged against the corrected
+threshold (no rescan needed); late detections are saved with a
+'late_after_recalibration' marker, everything else is deleted then.
 
 Status protocol on stdout (parsed by the GUI):
   @@PHASE <setup|live|error>
@@ -333,17 +345,200 @@ def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
     times = np.concatenate(all_times)
     win_scales = np.concatenate(all_scales)
 
+    best = int(np.argmax(normed))
+    return {"detections": detections_at(normed, raw, times, win_scales,
+                                        threshold),
+            "best_score": float(normed[best]), "best_time": float(times[best]),
+            "best_scale": float(win_scales[best]),
+            # Full per-window arrays: LiveScanner pools the scores for
+            # periodic recalibration and re-judges held chunks against a
+            # recalibrated threshold without rescanning the audio.
+            "all_scores": normed, "all_raw": raw,
+            "all_times": times, "all_scales": win_scales}
+
+
+def detections_at(normed, raw, times, win_scales, threshold):
+    """Detection records for the windows at/above threshold."""
+    import numpy as np
     hit_idx = np.where(normed >= threshold)[0]
     detections = [{"time": float(times[i]), "score": float(normed[i]),
                    "raw_cos": float(raw[i]), "scale": float(win_scales[i])}
                   for i in hit_idx]
     detections.sort(key=lambda d: -d["score"])
+    return detections
 
-    best = int(np.argmax(normed))
-    return {"detections": detections,
-            "best_score": float(normed[best]), "best_time": float(times[best]),
-            "best_scale": float(win_scales[best]),
-            "all_scores": normed}  # for the recalibration pool - see main()
+
+# --------------------------------------------------------------------------
+# Live loop state: keep/delete decisions, recalibration, held chunks
+# --------------------------------------------------------------------------
+
+class LiveScanner:
+    """Owns the live monitoring loop's mutable state: the working
+    threshold, the recalibration score pool, and the holding area for
+    chunks judged before the threshold has been corrected once.
+
+    Periodic recalibration (why not the bootstrap's literal p100): the
+    bootstrap calibration is a small transcript-less sample - a keyword
+    utterance inside it sets the p100 threshold to its own score,
+    guaranteeing a miss. A literal max can only stay flat or rise as more
+    data arrives, so growing the pool alone never recovers; instead the
+    threshold is refit excluding the pool's `tolerance` most extreme
+    points, which evicts a one-off leak almost immediately at the honest
+    cost of tolerating that many genuinely extreme hard negatives
+    (verified numerically + end-to-end; experiment log, "Calibration
+    leakage without transcripts").
+
+    Held chunks (why deletion is deferred at session start): the chunks
+    most likely to be mis-judged are the bootstrap-era ones scanned
+    seconds after setup - exactly the audio whose keyword utterance may
+    have contaminated the calibration (observed twice: 'south' 4.3851 vs
+    threshold 4.3852, 'brain' 5.74 vs 5.743 - both epsilon-misses of the
+    utterance that set the threshold). Deleting them on first judgment
+    makes the error unrecoverable. So until the first recalibration, no-
+    match chunks are HELD on disk with their per-window scores kept in
+    memory; when the first recalibration fires (as soon as the pool
+    reaches min_pool - the interval only throttles refits after that),
+    every held chunk is re-judged against the corrected threshold with no
+    rescan needed. hold_cap bounds the held set: if the pool somehow
+    never fills, held chunks are adjudicated under the current threshold
+    rather than accumulating forever.
+    """
+
+    def __init__(self, keyword, det_dir, live_log, threshold,
+                 interval_seconds, min_pool, pool_cap, tolerance, hold_cap,
+                 scan_fn, on_detect=None):
+        import numpy as np
+        self._np = np
+        self.keyword = keyword
+        self.det_dir = det_dir
+        self.live_log = live_log
+        self.threshold = threshold
+        self.interval_seconds = interval_seconds
+        self.min_pool = min_pool
+        self.tolerance = tolerance
+        self.hold_cap = hold_cap
+        self.scan_fn = scan_fn                  # audio_path -> scan dict|None
+        self.on_detect = on_detect or (lambda total: None)
+        self.pool = deque(maxlen=pool_cap)
+        self.held = []                          # [(video, audio, name, scan)]
+        self.recalibrated_once = False
+        self.last_recalib = time.monotonic()
+        self.total_detected = 0
+
+    # -- outcomes ----------------------------------------------------------
+    def _log(self, msg):
+        with open(self.live_log, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
+        status(msg)
+
+    def _keep(self, video_path, audio_path, name, scan, detections,
+              late=False):
+        self.total_detected += len(detections)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = f"{stamp}_{name[:-4]}"
+        if os.path.exists(audio_path):
+            shutil.move(audio_path, os.path.join(self.det_dir, base + ".wav"))
+        if os.path.exists(video_path):
+            shutil.move(video_path, os.path.join(self.det_dir, base + ".mp4"))
+        with open(os.path.join(self.det_dir, base + ".json"), "w") as f:
+            json.dump({"keyword": self.keyword, "chunk": name,
+                       "detected_at": datetime.now().isoformat(timespec="seconds"),
+                       "threshold": self.threshold,
+                       "late_after_recalibration": late,
+                       "best_score": scan["best_score"],
+                       "detections": detections}, f, indent=2)
+        top = detections[0]
+        self._log(f"MATCH{' (late, after recalibration)' if late else ''} "
+                  f"'{self.keyword}' in {name} at {top['time']:.1f}s "
+                  f"(AS-norm {top['score']:.2f}, threshold "
+                  f"{self.threshold:.2f}) -> saved {base}.mp4")
+        self.on_detect(self.total_detected)
+
+    @staticmethod
+    def _drop(video_path, audio_path):
+        for p in (audio_path, video_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+    # -- recalibration -----------------------------------------------------
+    def _maybe_recalibrate(self):
+        if self.interval_seconds <= 0:
+            return
+        if len(self.pool) < self.min_pool:
+            return
+        # The interval throttles REFITS; the first correction should land
+        # as soon as there is enough data, not a full interval later -
+        # held chunks are waiting on it.
+        if self.recalibrated_once and (
+                time.monotonic() - self.last_recalib < self.interval_seconds):
+            return
+        self.last_recalib = time.monotonic()
+        np = self._np
+        pool = np.fromiter(self.pool, dtype=np.float64)
+        pct = 100.0 * (1.0 - self.tolerance / len(pool))
+        old = self.threshold
+        self.threshold = float(np.percentile(pool, pct)) + 1e-4
+        self._log(f"Recalibrated: threshold {old:.3f} -> "
+                  f"{self.threshold:.3f} (top {self.tolerance} of "
+                  f"{len(pool)} live-observed scores excluded)")
+        if not self.recalibrated_once:
+            self.recalibrated_once = True
+            self._adjudicate_held()
+
+    def _adjudicate_held(self):
+        held, self.held = self.held, []
+        n_late = 0
+        for video_path, audio_path, name, scan in held:
+            detections = detections_at(
+                scan["all_scores"], scan["all_raw"], scan["all_times"],
+                scan["all_scales"], self.threshold)
+            if detections:
+                n_late += 1
+                self._keep(video_path, audio_path, name, scan, detections,
+                           late=True)
+            else:
+                self._drop(video_path, audio_path)
+        if held:
+            self._log(f"Re-judged {len(held)} held chunk(s) under the "
+                      f"recalibrated threshold: {n_late} late detection(s), "
+                      f"{len(held) - n_late} deleted")
+
+    # -- per-chunk entry point ----------------------------------------------
+    def process_chunk(self, video_path, audio_path):
+        name = os.path.basename(audio_path)
+        if not os.path.exists(audio_path):
+            return
+        scan = self.scan_fn(audio_path)
+        if scan is None:
+            status(f"{name}: too short - chunk deleted")
+            self._drop(video_path, audio_path)
+            return
+
+        detections = detections_at(
+            scan["all_scores"], scan["all_raw"], scan["all_times"],
+            scan["all_scales"], self.threshold)
+        if detections:
+            self._keep(video_path, audio_path, name, scan, detections)
+        else:
+            # Never pool scores from a chunk currently believed to contain
+            # the keyword - don't reinforce the threshold that decided it.
+            self.pool.extend(scan["all_scores"].tolist())
+            if self.recalibrated_once:
+                status(f"{name}: no match (best AS-norm "
+                       f"{scan['best_score']:.2f}) - chunk deleted")
+                self._drop(video_path, audio_path)
+            else:
+                self.held.append((video_path, audio_path, name, scan))
+                status(f"{name}: no match (best AS-norm "
+                       f"{scan['best_score']:.2f}) - held until first "
+                       f"recalibration ({len(self.held)} held)")
+                if len(self.held) > self.hold_cap:
+                    status(f"Hold cap ({self.hold_cap}) reached before the "
+                           f"first recalibration - adjudicating held chunks "
+                           f"under the current threshold")
+                    self.recalibrated_once = True   # stop holding new ones
+                    self._adjudicate_held()
+        self._maybe_recalibrate()
 
 
 # --------------------------------------------------------------------------
@@ -377,11 +572,15 @@ def main():
     ap.add_argument("--recalib-tolerance", type=int, default=5,
                     help="number of the pool's most extreme scores "
                          "excluded before taking the max (NOT the "
-                         "bootstrap's literal p100 - see maybe_recalibrate "
+                         "bootstrap's literal p100 - see LiveScanner "
                          "for why growing the pool alone can't fix a "
                          "literal max; this tolerates up to K extreme "
                          "hard negatives in exchange for actually "
                          "recovering from a leaked keyword)")
+    ap.add_argument("--hold-cap", type=int, default=60,
+                    help="max no-match chunks held on disk awaiting the "
+                         "first recalibration before being adjudicated "
+                         "under the current threshold anyway")
     args = ap.parse_args()
 
     keyword = args.keyword.strip().lower() if args.keyword else None
@@ -513,112 +712,25 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
-    recalib_pool = deque(maxlen=args.recalib_pool_cap)
-    last_recalib = time.monotonic()
-
     # -- 5. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
     emit("PHASE", "live")
     live_log = os.path.join(log_dir, f"live_{keyword}.txt")
-    total_detected = 0
     emit("DETECT", "0")
 
-    def maybe_recalibrate():
-        """Refit the threshold from the growing live-score pool.
-
-        See the module docstring's "Periodic recalibration" section: this
-        is what actually protects a long-running session against the
-        bootstrap sample's one-shot leakage risk, since no per-window
-        statistical test can reliably tell a leaked keyword utterance
-        apart from a legitimate hard negative in a small sample.
-
-        Deliberately NOT the bootstrap's literal p100 (verified numerically
-        before shipping this - see the experiment log's "periodic
-        recalibration" entry): p100 is the sample maximum, which can only
-        stay flat or increase as more data arrives, so a single leaked
-        point that entered the pool once remains its ceiling FOREVER no
-        matter how much clean data piles up afterward - growing the pool
-        alone does not fix p100. What actually recovers the clean value is
-        excluding a small fixed number of the pool's most extreme points
-        (--recalib-tolerance, K) before taking the max: a genuine one-off
-        leak occupies exactly one of those K slots and gets excluded once
-        there are at least K other points in the pool (trivial almost
-        immediately), while the K-tolerant percentile still converges to
-        the true clean ceiling. The cost is real and worth stating
-        plainly: up to K legitimately-extreme hard negatives per pool are
-        now tolerated rather than guaranteed zero false alarms - the
-        bootstrap calibration's strict p100 guarantee only ever applied to
-        that first small sample anyway.
-        """
-        nonlocal threshold, threshold_desc, last_recalib
-        if args.recalib_interval_seconds <= 0:
-            return
-        if time.monotonic() - last_recalib < args.recalib_interval_seconds:
-            return
-        last_recalib = time.monotonic()
-        if len(recalib_pool) < args.recalib_min_pool:
-            return
-        pool = np.fromiter(recalib_pool, dtype=np.float64)
-        pct = 100.0 * (1.0 - args.recalib_tolerance / len(pool))
-        new_threshold = float(np.percentile(pool, pct)) + 1e-4
-        old = threshold
-        threshold = new_threshold
-        threshold_desc = f"recalibrated on {len(pool)} live scores"
-        msg = (f"Recalibrated: threshold {old:.3f} -> {threshold:.3f} "
-               f"(top {args.recalib_tolerance} of {len(pool)} live-observed "
-               f"scores excluded)")
-        with open(live_log, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
-        status(msg)
-
-    def process_chunk(video_path, audio_path):
-        nonlocal total_detected
-        name = os.path.basename(audio_path)
-        if not os.path.exists(audio_path):
-            return
+    def scan_audio(audio_path):
         y, _ = librosa.load(audio_path, sr=SAMPLE_RATE)
-        scan = scan_chunk(y, model, anchor, cohort, window_samples,
-                          threshold, SAMPLE_RATE, DEFAULT_TOP_K)
-        del y
-        detections = scan["detections"] if scan is not None else []
+        return scan_chunk(y, model, anchor, cohort, window_samples,
+                          scanner.threshold, SAMPLE_RATE, DEFAULT_TOP_K)
 
-        # Feed the recalibration pool from every chunk EXCEPT one currently
-        # believed to contain the keyword - never reinforce the very
-        # threshold that decided this chunk (see maybe_recalibrate above).
-        if scan is not None and not detections:
-            recalib_pool.extend(scan["all_scores"].tolist())
-        maybe_recalibrate()
-
-        if detections:
-            total_detected += len(detections)
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base = f"{stamp}_{name[:-4]}"
-            kept_video = os.path.join(det_dir, base + ".mp4")
-            kept_audio = os.path.join(det_dir, base + ".wav")
-            shutil.move(audio_path, kept_audio)
-            if os.path.exists(video_path):
-                shutil.move(video_path, kept_video)
-            with open(os.path.join(det_dir, base + ".json"), "w") as f:
-                json.dump({"keyword": keyword, "chunk": name,
-                           "detected_at": datetime.now().isoformat(timespec="seconds"),
-                           "threshold": threshold,
-                           "best_score": scan["best_score"],
-                           "detections": detections}, f, indent=2)
-            top = detections[0]
-            msg = (f"MATCH '{keyword}' in {name} at {top['time']:.1f}s "
-                   f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}) "
-                   f"-> saved {base}.mp4")
-            with open(live_log, "a", encoding="utf-8") as f:
-                f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
-            status(msg)
-            emit("DETECT", str(total_detected))
-        else:
-            detail = "too short" if scan is None else (
-                f"best AS-norm {scan['best_score']:.2f}")
-            status(f"{name}: no match ({detail}) - chunk deleted")
-            for p in (audio_path, video_path):
-                if os.path.exists(p):
-                    os.remove(p)
+    scanner = LiveScanner(
+        keyword=keyword, det_dir=det_dir, live_log=live_log,
+        threshold=threshold,
+        interval_seconds=args.recalib_interval_seconds,
+        min_pool=args.recalib_min_pool, pool_cap=args.recalib_pool_cap,
+        tolerance=args.recalib_tolerance, hold_cap=args.hold_cap,
+        scan_fn=scan_audio,
+        on_detect=lambda total: emit("DETECT", str(total)))
 
     # Disk backlog first: chunks left over from a previous run. Everything
     # downloaded during THIS run (bootstrap included) is already in the
@@ -626,12 +738,12 @@ def main():
     for audio_path in pre_existing:
         video_path = os.path.join(
             video_dir, os.path.basename(audio_path)[:-4] + ".mp4")
-        process_chunk(video_path, audio_path)
+        scanner.process_chunk(video_path, audio_path)
 
     status("Monitoring live stream - scanning chunks as they arrive ...")
     while True:
         video_path, audio_path, _idx = chunk_queue.get()
-        process_chunk(video_path, audio_path)
+        scanner.process_chunk(video_path, audio_path)
         emit("QUEUE", str(chunk_queue.qsize()))
 
 

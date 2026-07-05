@@ -348,6 +348,27 @@ formula above: threshold dropped to 3.1930. Rescanning the same
 `live_6.wav` under the new threshold: **2 detections, best score 3.2355 -
 recovered.**
 
+**Addendum (same day): held chunks close the sequencing hole.** A live
+'brain' session hit the residual gap: recalibration protects *future*
+utterances, but the bootstrap-era chunks are scanned seconds after setup -
+before the pool has any data - and were deleted on their (contaminated)
+no-match verdict, making the error unrecoverable (best 5.74 vs threshold
+5.743, the same epsilon-miss signature as 'south'). Fix: the live loop
+was refactored into a testable `LiveScanner` class; until the first
+recalibration, no-match chunks are HELD on disk with their per-window
+scores kept in memory, the first recalibration now fires as soon as the
+pool reaches min_pool (~7 chunks; the interval only throttles later
+refits - previously the first one also waited the full 300s, and a timer
+bug reset the countdown even when the pool was too small to fire), and
+every held chunk is then re-judged against the corrected threshold with
+no rescan. Late detections are saved with a `late_after_recalibration`
+marker. Unit-tested with injected scans reproducing the brain scenario
+exactly: contaminated threshold 5.743, utterance peak 5.7429 held at
+chunk 1, first recalibration after 7 chunks -> threshold 4.801 -> held
+chunk re-judged as a late MATCH, clean chunks deleted, nothing left
+held. scan_chunk parity vs pipeline/detector.py re-verified after the
+refactor (best scores match to <1e-4, detection counts identical).
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
