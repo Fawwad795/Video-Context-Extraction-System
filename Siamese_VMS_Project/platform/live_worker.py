@@ -35,41 +35,40 @@ if the detector cannot keep up with the stream, the oldest unprocessed
 chunk is dropped (during setup, new segments are skipped instead, so the
 files setup is reading stay stable).
 
-Periodic recalibration: the bootstrap calibration is a small, one-shot
+Held-chunk adjudication: the bootstrap calibration is a small, one-shot
 sample (~10 chunks, ~50s of audio) with no transcripts to exclude a chunk
 that happens to contain the keyword - an unlucky draw sets the threshold
-to that utterance's own score, guaranteeing a miss for it (and similar
-future ones). No per-window statistical test can safely detect this after
-the fact (tried and rejected - see core/scoring.evt_threshold's
-docstring): a genuine hard negative and a leaked keyword utterance can be
-statistically indistinguishable in a small sample.
+to that utterance's own score, guaranteeing a miss for it. No per-window
+statistical test can safely detect this after the fact (three tried and
+rejected - see core/scoring.evt_threshold's docstring and the experiment
+log's "Calibration leakage without transcripts": a genuine hard negative
+and a leaked keyword utterance can be statistically indistinguishable in
+a small sample). A fixed-tolerance percentile recalibration was tried
+next and also rejected: excluding a small fixed count of a pool's top
+scores forces the threshold BELOW scores already known to be negatives
+once the pool is small, causing false positives by construction (observed
+live: 'morning', threshold 5.463 -> 2.065 on 6 pooled chunks, ~7 clean
+chunks then fired).
 
-The fix is NOT "grow the sample and take the max again" - a literal max
-can only stay flat or rise as more data arrives, so one leaked point stays
-its ceiling forever no matter how much clean data piles up afterward
-(verified numerically before shipping this). Every scan already computes
-AS-norm scores for every window of every chunk, so LiveScanner feeds
-those scores (from chunks that did NOT trigger a detection - never from a
-chunk currently believed to contain the keyword) into a growing, capped
-pool, and the threshold is refit by excluding a small fixed number of the
-pool's most extreme points (--recalib-tolerance) before taking the max -
-first as soon as the pool reaches --recalib-min-pool, then every
---recalib-interval-seconds. A one-off leak occupies one of the excluded
-slots once the pool has grown past it, recovering the clean ceiling - at
-the honest cost of also tolerating that many genuinely extreme hard
-negatives per pool, rather than the bootstrap sample's strict (but
-small-sample-fragile) zero-false-alarm guarantee.
-
-Held chunks close the remaining sequencing hole: the chunks most at risk
-of a wrong no-match verdict are the bootstrap-era ones scanned right after
-setup - exactly the audio whose keyword utterance may have contaminated
-the calibration - and deleting them on first judgment made the error
-unrecoverable (observed twice: 'south', then 'brain', each missing its own
-calibration-contaminating utterance by one epsilon). Until the first
-recalibration, no-match chunks are therefore held on disk with their
-window scores kept in memory, then re-judged against the corrected
-threshold (no rescan needed); late detections are saved with a
-'late_after_recalibration' marker, everything else is deleted then.
+What works: keep the validated protocol's core guarantee (never fire
+below any observed negative window) and give it exactly one chance to
+self-correct. Until LiveScanner has seen --hold-min-chunks chunks
+(default 30, bootstrap-scale evidence), no-match chunks are HELD on disk
+with their scan results kept in memory rather than deleted - the chunks
+most at risk of a wrong verdict are these earliest ones, since they are
+the same audio the bootstrap calibration itself may have leaked from.
+Once enough have accumulated, a single adjudication runs: the held
+chunk with the single highest peak may fire ONLY IF it beats every
+window of every OTHER held chunk (leave-one-out p100) AND its peak sits
+at the current threshold's epsilon (i.e. it is the very window that set
+the contaminated ceiling). At most one chunk can ever satisfy both
+conditions, so the threshold either drops to the second-highest ceiling
+and that one chunk is saved for review (it may be the leak, or may be a
+clean bootstrap's own hardest negative - indistinguishable by
+construction, hence "review" not "assume") - or nothing fires and the
+original threshold stands. After this one-time pass, the detector runs
+exactly like the offline protocol: p100 fixed at setup, no further
+adjustment; late detections carry a 'late_after_adjudication' marker.
 
 Status protocol on stdout (parsed by the GUI):
   @@PHASE <setup|live|error>
@@ -89,7 +88,6 @@ import sys
 import threading
 import time
 import urllib.request
-from collections import deque
 from datetime import datetime
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -350,9 +348,8 @@ def scan_chunk(y, model, anchor, cohort, window_samples, threshold,
                                         threshold),
             "best_score": float(normed[best]), "best_time": float(times[best]),
             "best_scale": float(win_scales[best]),
-            # Full per-window arrays: LiveScanner pools the scores for
-            # periodic recalibration and re-judges held chunks against a
-            # recalibrated threshold without rescanning the audio.
+            # Full per-window arrays: LiveScanner re-judges held chunks
+            # against an adjudicated threshold without rescanning the audio.
             "all_scores": normed, "all_raw": raw,
             "all_times": times, "all_scales": win_scales}
 
@@ -369,60 +366,61 @@ def detections_at(normed, raw, times, win_scales, threshold):
 
 
 # --------------------------------------------------------------------------
-# Live loop state: keep/delete decisions, recalibration, held chunks
+# Live loop state: keep/delete decisions and held-chunk adjudication
 # --------------------------------------------------------------------------
 
 class LiveScanner:
     """Owns the live monitoring loop's mutable state: the working
-    threshold, the recalibration score pool, and the holding area for
-    chunks judged before the threshold has been corrected once.
+    threshold and the held chunks awaiting one-time adjudication.
 
-    Periodic recalibration (why not the bootstrap's literal p100): the
-    bootstrap calibration is a small transcript-less sample - a keyword
-    utterance inside it sets the p100 threshold to its own score,
-    guaranteeing a miss. A literal max can only stay flat or rise as more
-    data arrives, so growing the pool alone never recovers; instead the
-    threshold is refit excluding the pool's `tolerance` most extreme
-    points, which evicts a one-off leak almost immediately at the honest
-    cost of tolerating that many genuinely extreme hard negatives
-    (verified numerically + end-to-end; experiment log, "Calibration
-    leakage without transcripts").
+    The bootstrap calibration is a small transcript-less sample - a
+    keyword utterance inside it sets the p100 threshold to its own score,
+    guaranteeing a miss (observed three times: 'south' 4.3851 vs threshold
+    4.3852, 'brain' 5.74 vs 5.743, 'morning' 5.46 vs 5.463 - each an
+    epsilon-miss of the very utterance that set the threshold). No
+    per-sample statistic can tell that leaked utterance apart from a
+    legitimate extreme hard negative (experiment log, "Calibration
+    leakage without transcripts"): score-range excision, temporal-burst
+    excision, and a Generalized Pareto tail fit were all tried and
+    rejected. A fixed-tolerance percentile recalibration was tried next
+    and is ALSO unsound in a different way: excluding a small fixed count
+    of a pool's top scores forces the threshold BELOW scores already
+    known to be negatives once the pool is small, causing false positives
+    by construction (observed live: 'morning', threshold 5.463 -> 2.065 on
+    a 6-chunk pool, ~7 clean chunks then fired).
 
-    Held chunks (why deletion is deferred at session start): the chunks
-    most likely to be mis-judged are the bootstrap-era ones scanned
-    seconds after setup - exactly the audio whose keyword utterance may
-    have contaminated the calibration (observed twice: 'south' 4.3851 vs
-    threshold 4.3852, 'brain' 5.74 vs 5.743 - both epsilon-misses of the
-    utterance that set the threshold). Deleting them on first judgment
-    makes the error unrecoverable. So until the first recalibration, no-
-    match chunks are HELD on disk with their per-window scores kept in
-    memory; when the first recalibration fires (as soon as the pool
-    reaches min_pool - the interval only throttles refits after that),
-    every held chunk is re-judged against the corrected threshold with no
-    rescan needed. hold_cap bounds the held set: if the pool somehow
-    never fills, held chunks are adjudicated under the current threshold
-    rather than accumulating forever.
+    What works: keep the validated protocol's core guarantee - never fire
+    below any observed negative window - and give it exactly ONE chance
+    to self-correct, rather than repeatedly tuning a threshold down.
+    Until min_chunks no-match chunks have been seen (bootstrap-scale
+    evidence, ~30), they are HELD on disk with their scan results kept in
+    memory instead of deleted - these earliest chunks are exactly the
+    audio the bootstrap calibration may have leaked from. Once min_chunks
+    is reached, a single adjudication runs: the held chunk with the
+    highest peak may fire ONLY
+    IF it (a) beats every window of every OTHER held chunk (leave-one-out
+    p100) AND (b) its peak sits at the current threshold's epsilon (i.e.
+    it is the very window that set the ceiling). At most one chunk can
+    ever satisfy both, so either the threshold drops to the second-
+    highest ceiling and that one chunk is saved for review - it may be
+    the leak, or may be a clean bootstrap's own hardest negative,
+    indistinguishable by construction, hence "review" not "assume" - or
+    nothing fires and the original threshold stands. After this one-time
+    pass the detector runs exactly like the offline protocol: fixed
+    threshold, no further adjustment.
     """
 
     def __init__(self, keyword, det_dir, live_log, threshold,
-                 interval_seconds, min_pool, pool_cap, tolerance, hold_cap,
-                 scan_fn, on_detect=None):
-        import numpy as np
-        self._np = np
+                 min_chunks, scan_fn, on_detect=None):
         self.keyword = keyword
         self.det_dir = det_dir
         self.live_log = live_log
         self.threshold = threshold
-        self.interval_seconds = interval_seconds
-        self.min_pool = min_pool
-        self.tolerance = tolerance
-        self.hold_cap = hold_cap
+        self.min_chunks = min_chunks
         self.scan_fn = scan_fn                  # audio_path -> scan dict|None
         self.on_detect = on_detect or (lambda total: None)
-        self.pool = deque(maxlen=pool_cap)
         self.held = []                          # [(video, audio, name, scan)]
-        self.recalibrated_once = False
-        self.last_recalib = time.monotonic()
+        self.adjudicated = False
         self.total_detected = 0
 
     # -- outcomes ----------------------------------------------------------
@@ -444,11 +442,11 @@ class LiveScanner:
             json.dump({"keyword": self.keyword, "chunk": name,
                        "detected_at": datetime.now().isoformat(timespec="seconds"),
                        "threshold": self.threshold,
-                       "late_after_recalibration": late,
+                       "late_after_adjudication": late,
                        "best_score": scan["best_score"],
                        "detections": detections}, f, indent=2)
         top = detections[0]
-        self._log(f"MATCH{' (late, after recalibration)' if late else ''} "
+        self._log(f"MATCH{' (late, after adjudication)' if late else ''} "
                   f"'{self.keyword}' in {name} at {top['time']:.1f}s "
                   f"(AS-norm {top['score']:.2f}, threshold "
                   f"{self.threshold:.2f}) -> saved {base}.mp4")
@@ -460,48 +458,54 @@ class LiveScanner:
             if os.path.exists(p):
                 os.remove(p)
 
-    # -- recalibration -----------------------------------------------------
-    def _maybe_recalibrate(self):
-        if self.interval_seconds <= 0:
-            return
-        if len(self.pool) < self.min_pool:
-            return
-        # The interval throttles REFITS; the first correction should land
-        # as soon as there is enough data, not a full interval later -
-        # held chunks are waiting on it.
-        if self.recalibrated_once and (
-                time.monotonic() - self.last_recalib < self.interval_seconds):
-            return
-        self.last_recalib = time.monotonic()
-        np = self._np
-        pool = np.fromiter(self.pool, dtype=np.float64)
-        pct = 100.0 * (1.0 - self.tolerance / len(pool))
-        old = self.threshold
-        self.threshold = float(np.percentile(pool, pct)) + 1e-4
-        self._log(f"Recalibrated: threshold {old:.3f} -> "
-                  f"{self.threshold:.3f} (top {self.tolerance} of "
-                  f"{len(pool)} live-observed scores excluded)")
-        if not self.recalibrated_once:
-            self.recalibrated_once = True
-            self._adjudicate_held()
+    # -- one-time post-bootstrap adjudication --------------------------------
+    def _adjudicate(self):
+        """One-time adjudication of the held chunks (leave-own-chunk-out
+        p100), releasing a contaminated bootstrap ceiling if present.
 
-    def _adjudicate_held(self):
+        At most one held chunk can fire: it must (a) exceed every window
+        of every OTHER held chunk and (b) carry the epsilon-signature of
+        the window that set the current threshold (peak == threshold -
+        epsilon; a freshly-calibrated ceiling always leaves this residue
+        on its source chunk). If it fires, it is either the leaked keyword
+        utterance this mechanism exists to recover, or the hardest
+        negative of a genuinely clean bootstrap - indistinguishable cases
+        by construction (experiment log) - so the single candidate is
+        saved for the user to review rather than silently deleted, and
+        the threshold drops to the remaining observed ceiling.
+        """
+        self.adjudicated = True
         held, self.held = self.held, []
-        n_late = 0
-        for video_path, audio_path, name, scan in held:
-            detections = detections_at(
-                scan["all_scores"], scan["all_raw"], scan["all_times"],
-                scan["all_scales"], self.threshold)
-            if detections:
-                n_late += 1
+        fired = None
+        if len(held) >= 2:
+            candidate = max(held, key=lambda h: h[3]["best_score"])
+            peak = candidate[3]["best_score"]
+            others = max(h[3]["best_score"] for h in held
+                         if h[2] != candidate[2])
+            beats_everyone = peak >= others + 1e-4
+            set_the_ceiling = peak >= self.threshold - 2e-4
+            if beats_everyone and set_the_ceiling:
+                fired = candidate
+                old = self.threshold
+                self.threshold = others + 1e-4
+                video_path, audio_path, name, scan = candidate
+                detections = detections_at(
+                    scan["all_scores"], scan["all_raw"], scan["all_times"],
+                    scan["all_scales"], self.threshold)
+                self._log(f"Bootstrap ceiling released: threshold "
+                          f"{old:.3f} -> {self.threshold:.3f}; the chunk "
+                          f"that set it is saved for review (keyword leak "
+                          f"and hardest-negative are indistinguishable)")
                 self._keep(video_path, audio_path, name, scan, detections,
                            late=True)
-            else:
-                self._drop(video_path, audio_path)
+        for video_path, audio_path, name, scan in held:
+            if fired is not None and name == fired[2]:
+                continue
+            self._drop(video_path, audio_path)
         if held:
-            self._log(f"Re-judged {len(held)} held chunk(s) under the "
-                      f"recalibrated threshold: {n_late} late detection(s), "
-                      f"{len(held) - n_late} deleted")
+            self._log(f"Adjudicated {len(held)} held chunk(s): "
+                      f"{'1 late detection' if fired else 'no late detection'}"
+                      f", {len(held) - (1 if fired else 0)} deleted")
 
     # -- per-chunk entry point ----------------------------------------------
     def process_chunk(self, video_path, audio_path):
@@ -517,28 +521,20 @@ class LiveScanner:
         detections = detections_at(
             scan["all_scores"], scan["all_raw"], scan["all_times"],
             scan["all_scales"], self.threshold)
+
         if detections:
             self._keep(video_path, audio_path, name, scan, detections)
+        elif self.adjudicated:
+            status(f"{name}: no match (best AS-norm "
+                   f"{scan['best_score']:.2f}) - chunk deleted")
+            self._drop(video_path, audio_path)
         else:
-            # Never pool scores from a chunk currently believed to contain
-            # the keyword - don't reinforce the threshold that decided it.
-            self.pool.extend(scan["all_scores"].tolist())
-            if self.recalibrated_once:
-                status(f"{name}: no match (best AS-norm "
-                       f"{scan['best_score']:.2f}) - chunk deleted")
-                self._drop(video_path, audio_path)
-            else:
-                self.held.append((video_path, audio_path, name, scan))
-                status(f"{name}: no match (best AS-norm "
-                       f"{scan['best_score']:.2f}) - held until first "
-                       f"recalibration ({len(self.held)} held)")
-                if len(self.held) > self.hold_cap:
-                    status(f"Hold cap ({self.hold_cap}) reached before the "
-                           f"first recalibration - adjudicating held chunks "
-                           f"under the current threshold")
-                    self.recalibrated_once = True   # stop holding new ones
-                    self._adjudicate_held()
-        self._maybe_recalibrate()
+            self.held.append((video_path, audio_path, name, scan))
+            status(f"{name}: no match (best AS-norm "
+                   f"{scan['best_score']:.2f}) - held until adjudication "
+                   f"({len(self.held)} held)")
+            if len(self.held) >= self.min_chunks:
+                self._adjudicate()
 
 
 # --------------------------------------------------------------------------
@@ -559,28 +555,13 @@ def main():
                     help="chunks needed up-front for cohort/calibration")
     ap.add_argument("--backlog-cap", type=int, default=300,
                     help="max unprocessed chunks kept on disk before dropping")
-    ap.add_argument("--recalib-interval-seconds", type=int, default=300,
-                    help="how often to refit the threshold from live-"
-                         "observed scores (see 'Periodic recalibration' "
-                         "below); 0 disables it")
-    ap.add_argument("--recalib-min-pool", type=int, default=2000,
-                    help="minimum accumulated window scores before the "
-                         "first recalibration fires")
-    ap.add_argument("--recalib-pool-cap", type=int, default=100_000,
-                    help="max window scores kept in the recalibration "
-                         "pool (oldest dropped first - bounds memory)")
-    ap.add_argument("--recalib-tolerance", type=int, default=5,
-                    help="number of the pool's most extreme scores "
-                         "excluded before taking the max (NOT the "
-                         "bootstrap's literal p100 - see LiveScanner "
-                         "for why growing the pool alone can't fix a "
-                         "literal max; this tolerates up to K extreme "
-                         "hard negatives in exchange for actually "
-                         "recovering from a leaked keyword)")
-    ap.add_argument("--hold-cap", type=int, default=60,
-                    help="max no-match chunks held on disk awaiting the "
-                         "first recalibration before being adjudicated "
-                         "under the current threshold anyway")
+    ap.add_argument("--hold-min-chunks", type=int, default=30,
+                    help="no-match chunks held on disk (not deleted) "
+                         "before the one-time post-bootstrap adjudication "
+                         "runs - see LiveScanner for why holding early "
+                         "chunks, not periodic recalibration, is what "
+                         "safely recovers a leaked-keyword bootstrap "
+                         "threshold")
     args = ap.parse_args()
 
     keyword = args.keyword.strip().lower() if args.keyword else None
@@ -725,10 +706,7 @@ def main():
 
     scanner = LiveScanner(
         keyword=keyword, det_dir=det_dir, live_log=live_log,
-        threshold=threshold,
-        interval_seconds=args.recalib_interval_seconds,
-        min_pool=args.recalib_min_pool, pool_cap=args.recalib_pool_cap,
-        tolerance=args.recalib_tolerance, hold_cap=args.hold_cap,
+        threshold=threshold, min_chunks=args.hold_min_chunks,
         scan_fn=scan_audio,
         on_detect=lambda total: emit("DETECT", str(total)))
 

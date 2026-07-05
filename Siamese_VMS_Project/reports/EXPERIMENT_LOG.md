@@ -348,7 +348,7 @@ formula above: threshold dropped to 3.1930. Rescanning the same
 `live_6.wav` under the new threshold: **2 detections, best score 3.2355 -
 recovered.**
 
-**Addendum (same day): held chunks close the sequencing hole.** A live
+**Addendum 1 (same day): held chunks close the sequencing hole.** A live
 'brain' session hit the residual gap: recalibration protects *future*
 utterances, but the bootstrap-era chunks are scanned seconds after setup -
 before the pool has any data - and were deleted on their (contaminated)
@@ -361,13 +361,53 @@ pool reaches min_pool (~7 chunks; the interval only throttles later
 refits - previously the first one also waited the full 300s, and a timer
 bug reset the countdown even when the pool was too small to fire), and
 every held chunk is then re-judged against the corrected threshold with
-no rescan. Late detections are saved with a `late_after_recalibration`
-marker. Unit-tested with injected scans reproducing the brain scenario
-exactly: contaminated threshold 5.743, utterance peak 5.7429 held at
-chunk 1, first recalibration after 7 chunks -> threshold 4.801 -> held
-chunk re-judged as a late MATCH, clean chunks deleted, nothing left
-held. scan_chunk parity vs pipeline/detector.py re-verified after the
-refactor (best scores match to <1e-4, detection counts identical).
+no rescan.
+
+**Addendum 2 (same day): the fixed-tolerance recalibration itself was
+unsound.** A live 'morning' session exposed it: bootstrap threshold 5.463,
+contaminated by the keyword's own utterance as usual. The first
+recalibration fired on a pool of only 6 held chunks and, per the K=5
+tolerance rule, excluded the top 5 of those 6 scores before taking the
+max - on a pool that small, "exclude the top 5" is barely different from
+"ignore almost everyone," and the resulting threshold (2.065) landed
+*below several legitimately clean chunks' own natural scores* (2.13,
+2.15). Those chunks then fired as false positives - a sweep, not a
+recovery. The tolerance design's flaw was structural, not a tuning
+mistake: excluding a FIXED COUNT is only safe once the pool is large
+relative to that count, but the whole point of recalibrating early (to
+protect bootstrap-era held chunks) requires firing on a SMALL pool. The
+two goals are in direct tension and no fixed K resolves both.
+
+**Fix: held-chunk adjudication, exactly once per session, no tolerance.**
+Discard the growing-pool/percentile idea entirely. Instead, no-match
+chunks are held (as in Addendum 1) until `hold_min_chunks` (default 30,
+genuine bootstrap-scale evidence) have been seen. Then ONE adjudication
+runs: the held chunk with the single highest peak may fire only if (a) it
+beats every window of every OTHER held chunk (leave-one-out p100 - the
+same "never fire below anything observed" guarantee the offline protocol
+uses, just applied post hoc) and (b) it sits at the current threshold's
+epsilon (i.e. it is provably the window that set the contaminated
+ceiling, not merely a high scorer). At most one chunk can ever satisfy
+both conditions simultaneously - so recovery is bounded to exactly one
+release per session, never a sweep. The honest cost, stated plainly: the
+ceiling-setting chunk of a genuinely CLEAN bootstrap is mathematically
+indistinguishable from a leak (both sit at exactly threshold-epsilon by
+construction), so every session - contaminated or not - surfaces exactly
+one late, clearly-marked review candidate. That is a bounded, transparent
+cost; the rejected tolerance design's cost was an unbounded, silent one.
+
+Unit-tested (`LiveScanner` with injected scans, no audio/model needed):
+(1) the brain scenario exactly - contaminated threshold 5.743, utterance
+peak 5.7429 held, adjudication after 12 chunks -> threshold drops to
+2.473, one late MATCH, 11 clean chunks deleted, nothing left held; (2) a
+synthetic contaminated-bootstrap scenario (25 clean chunks + 1 injected
+outlier far above all of them) -> exactly one late detection (the
+outlier), no sweep; (3) a synthetic CLEAN-bootstrap scenario (25 clean
+chunks, no injected outlier) -> exactly one late detection (whichever
+chunk naturally scored highest), confirming the documented always-one-
+review-candidate tradeoff rather than a bug. scan_chunk parity vs
+pipeline/detector.py re-verified after the refactor (best scores match to
+<1e-4, detection counts identical).
 
 ## Key findings
 
@@ -403,11 +443,21 @@ refactor (best scores match to <1e-4, detection counts identical).
 7. **A leaked-keyword calibration sample cannot be fixed by any per-sample
    statistic.** Score-range, temporal-burst, and GPD-tail-fit excision were
    all tried and rejected (section above) - a rigorous extreme-value fit
-   even agrees the leaked score is statistically unremarkable. The fix had
-   to change the *estimator's growth property*, not add a smarter filter:
-   periodic recalibration with a small fixed exceedance tolerance (K=5),
-   never the bootstrap's literal p100 (which cannot recover regardless of
-   how much data piles up - verified numerically before shipping).
+   even agrees the leaked score is statistically unremarkable.
+8. **A fixed exceedance tolerance is unsound too - it trades unbounded
+   recall risk for unbounded precision risk.** Excluding a small fixed
+   count of a growing pool's top scores before taking the max recovers a
+   leak once the pool is large, but on the SMALL pool a live session
+   necessarily has soon after bootstrap, "exclude the top K" forces the
+   threshold below scores already known to be negatives - a live
+   'morning' session dropped threshold 5.463 -> 2.065 on a 6-chunk pool
+   and swept in ~7 false positives. The two goals (recalibrate early
+   enough to protect held chunks; never fire below an observed negative)
+   are in direct tension for any fixed K. What actually works: hold
+   chunks until genuine bootstrap-scale evidence exists (~30 chunks), then
+   run ONE leave-one-out-p100 adjudication with no tolerance at all - at
+   most one chunk can ever pass it, bounding recovery to exactly one
+   reviewable release per session instead of an unbounded sweep.
 
 ## Artifact map (post-cleanup, 2026-07-02)
 

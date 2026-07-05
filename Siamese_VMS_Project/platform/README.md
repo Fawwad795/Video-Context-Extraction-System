@@ -67,31 +67,34 @@ second-guesses a detection; it saves the chunk and moves on.
 Because there are no transcripts, calibration cannot exclude keyword-bearing
 bootstrap chunks by label — a keyword spoken during the ~10-chunk bootstrap
 window can end up in its own "negative" sample, setting the threshold to
-its own score and guaranteeing a miss (the "south" bug). No per-window
-statistic can safely detect and remove this after the fact (three
-approaches tried and rejected — see `reports/EXPERIMENT_LOG.md`,
-"Calibration leakage without transcripts"; a rigorous extreme-value fit
-even agrees a leaked score is statistically unremarkable against a
-legitimate hard negative). Instead, **periodic recalibration**: every scan
-already computes AS-norm scores for every window, so `live_worker.py`
-feeds those scores — from chunks that did NOT trigger a detection — into a
-growing, capped pool (`--recalib-pool-cap`, default 100k), and refits the
-threshold by excluding a small fixed number of the pool's most extreme
-points (`--recalib-tolerance`, default 5) before taking the max —
-deliberately **not** the bootstrap's literal p100, which can only rise as
-the pool grows and would keep any one-off leak as its ceiling forever. The
-first refit fires as soon as the pool reaches `--recalib-min-pool`
-(default 2000 scores, ~7 chunks); after that, every
-`--recalib-interval-seconds` (default 300s). The cost is honest: up to
-that many genuinely extreme hard negatives per pool are now tolerated, in
-exchange for actually recovering from a leaked keyword.
+its own score and guaranteeing a miss (observed three times: "south",
+"brain", "morning" — each missed the very utterance that set its
+threshold by one epsilon). No per-window statistic can safely detect and
+remove this after the fact (three approaches tried and rejected — see
+`reports/EXPERIMENT_LOG.md`, "Calibration leakage without transcripts"; a
+rigorous extreme-value fit even agrees a leaked score is statistically
+unremarkable against a legitimate hard negative). A fixed-tolerance
+periodic recalibration was tried next and is *also* unsound in a
+different way: excluding a small fixed count of a growing pool's top
+scores forces the threshold below scores already known to be negatives
+once the pool is still small, causing false positives by construction
+(observed live: "morning", threshold 5.463 → 2.065 on a 6-chunk pool, ~7
+clean chunks then fired as false positives).
 
-And because the chunks most at risk of a wrong no-match verdict are the
-bootstrap-era ones scanned right after setup — exactly the audio whose
-keyword utterance may have contaminated the calibration — no-match chunks
-are **held on disk** (not deleted) until that first recalibration, then
-re-judged against the corrected threshold using their already-computed
-window scores. Late detections are saved with a
-`late_after_recalibration` marker in their JSON record; a hold cap
-(`--hold-cap`, default 60 chunks) bounds disk usage if the pool somehow
-never fills.
+**What actually works — held-chunk adjudication, exactly once per
+session:** no-match chunks are **held on disk** (not deleted) until
+`--hold-min-chunks` (default 30) have been seen — these earliest chunks
+are exactly the audio the bootstrap calibration may have leaked from. Then
+a single adjudication runs: the held chunk with the highest peak may fire
+*only if* it (a) beats every window of every other held chunk
+(leave-one-out p100) *and* (b) sits at the current threshold's epsilon
+(i.e. it is the very window that set the ceiling). At most one chunk per
+session can ever satisfy both — so a contaminated ceiling releases (that
+one chunk fires as a late, clearly-marked review candidate, and the
+threshold drops to the next-highest observed ceiling), while a genuinely
+clean session still surfaces exactly one bounded review candidate (its own
+hardest negative is mathematically indistinguishable from a leak) — never
+a sweep. After this one-time pass the detector runs exactly like the
+offline research protocol: fixed threshold, no further adjustment. Late
+detections are saved with a `late_after_adjudication` marker in their JSON
+record so they're never confused with an ordinary live match.

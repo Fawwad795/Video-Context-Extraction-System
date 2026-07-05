@@ -119,16 +119,17 @@ $$
 - **Leakage guards** (a spoken keyword inside the "negative" sample would set
   the p100 threshold to its own score + ε, guaranteeing a miss): research
   runs exclude keyword-bearing chunks via the transcript token check.
-  Deployment has no transcripts, and — after three per-sample statistical
-  fixes were tried and rejected (`reports/EXPERIMENT_LOG.md`, "Calibration
-  leakage without transcripts": score-range and temporal-burst excision
-  both regressed clean calibration, and even a rigorous extreme-value tail
-  fit agreed a leaked score can be statistically unremarkable) — the fix
-  lives in `platform/live_worker.py` instead: periodic recalibration on a
-  growing pool of live-observed scores, excluding a small fixed number of
-  its most extreme points (not the bootstrap's literal p100, which cannot
-  recover no matter how much data accumulates). See
-  [`platform/README.md`](platform/README.md).
+  Deployment has no transcripts, and — after four fixes were tried and
+  rejected (`reports/EXPERIMENT_LOG.md`, "Calibration leakage without
+  transcripts": score-range excision, temporal-burst excision, and a
+  Generalized Pareto tail fit all mis-fired on clean data, and a
+  fixed-tolerance percentile recalibration swept in false positives on
+  the small pool a live session has soon after bootstrap) — the fix lives
+  in `platform/live_worker.py` instead: no-match chunks are held (not
+  deleted) until genuine bootstrap-scale evidence exists, then a single
+  leave-one-out-p100 adjudication runs with no tolerance at all, bounding
+  recovery to at most one reviewable release per session rather than an
+  unbounded sweep. See [`platform/README.md`](platform/README.md).
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
