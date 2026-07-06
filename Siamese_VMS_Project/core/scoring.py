@@ -386,6 +386,50 @@ def spoken_numbers(text):
                  flags=re.IGNORECASE)
 
 
+def _keyword_prefix(keyword):
+    """Lowercased keyword plus a stem-based prefix for word-family matching.
+
+    A transcript token counts as the keyword if it equals the keyword
+    exactly, or - when the prefix is at least 4 characters - starts with
+    the prefix. Porter-stemming the keyword makes the prefix the shared
+    root, so 'health' also matches 'healthy'/'healthier'/'healthcare' and
+    'president' (stem 'presid') also matches 'presidential'/'presidents'/
+    'presidency'/'presided'. The 4-character floor stops a short keyword or
+    stem (e.g. 'art', 'cat') from prefix-matching unrelated words - those
+    fall back to exact match. nltk (pulled in by g2p_en) supplies the
+    stemmer; if it is unavailable the full keyword is used as the prefix,
+    which still catches suffix derivations like 'healthy'/'presidential'.
+    """
+    kw = keyword.strip().lower()
+    prefix = kw
+    try:
+        from nltk.stem import PorterStemmer
+        stem = PorterStemmer().stem(kw)
+        if len(stem) >= 4:
+            prefix = stem
+    except Exception:
+        pass
+    return kw, prefix
+
+
+def keyword_in_tokens(tokens, keyword):
+    """True if any transcript token belongs to the keyword's word family.
+
+    Shared by the calibration leakage guard (keyword_free_chunks) and the
+    validation / ablation ground truth so every stage agrees on what "this
+    chunk contains the keyword" means - otherwise calibration would exclude
+    a 'healthy' chunk while validation still scored it as a negative,
+    turning a correct derivative detection into a false alarm. See
+    _keyword_prefix for the matching rule.
+    """
+    kw, prefix = _keyword_prefix(keyword)
+    use_prefix = len(prefix) >= 4
+    for t in tokens:
+        if t == kw or (use_prefix and t.startswith(prefix)):
+            return True
+    return False
+
+
 def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
     """Live chunks with a transcript that exists and does not contain the keyword.
 
@@ -418,8 +462,8 @@ def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
                 current = m.group(1)
                 contains_kw.setdefault(current, False)
             elif current:
-                tokens = set(re.findall(r"[a-z']+", line.lower()))
-                if keyword.lower() in tokens:
+                tokens = re.findall(r"[a-z']+", line.lower())
+                if keyword_in_tokens(tokens, keyword):
                     contains_kw[current] = True
     files = [f for f in list_chunk_audios(audio_dir)
              if contains_kw.get(os.path.basename(f)) is False]

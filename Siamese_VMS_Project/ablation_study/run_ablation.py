@@ -35,6 +35,12 @@ COMBINED_PATH = os.path.join(ABLATION_DIR, "results", "combined_best.json")
 
 CHECKPOINT = os.path.join(SIAMESE_ROOT, "checkpoints", "siamese_v3_best.pth")
 
+# Share the calibration/validation word-family rule so ablation ground truth
+# counts derivatives (e.g. "healthy" for "health") the same way calibrate.py's
+# leakage guard excludes them.
+sys.path.insert(0, os.path.join(SIAMESE_ROOT, "core"))
+from scoring import keyword_in_tokens
+
 STEPS = (
     "keyword_generator",
     "cohort_builder",
@@ -115,8 +121,8 @@ def load_truth(keyword, run_root):
             current = m.group(1)
             truth.setdefault(current, False)
         elif current:
-            tokens = set(re.findall(r"[a-z']+", line.lower()))
-            if keyword.lower() in tokens:
+            tokens = re.findall(r"[a-z']+", line.lower())
+            if keyword_in_tokens(tokens, keyword):
                 truth[current] = True
     return truth
 

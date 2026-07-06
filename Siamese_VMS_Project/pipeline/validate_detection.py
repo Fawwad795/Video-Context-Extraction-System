@@ -1,7 +1,9 @@
 """Validate detector output against Whisper transcripts (chunk level).
 
 Ground truth: each live chunk is transcribed with whisper-tiny; a chunk is
-a true positive target iff the keyword appears as a word in its transcript.
+a true positive target iff a word from the keyword's family appears in its
+transcript (keyword_in_tokens: the keyword or a stem derivative such as
+"healthy" for "health"), matching the calibration leakage guard's rule.
 Predictions: chunks with at least one detection in logs/detections_<kw>.json
 (produced by detector.py).
 
@@ -20,7 +22,8 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 import console as ui
-from scoring import PROJECT_ROOT, list_chunk_audios, spoken_numbers
+from scoring import (PROJECT_ROOT, keyword_in_tokens, list_chunk_audios,
+                     spoken_numbers)
 
 warnings.filterwarnings("ignore")
 
@@ -62,8 +65,8 @@ def main():
     for audio_file in audio_files:
         name = os.path.basename(audio_file)
         text = spoken_numbers(asr(audio_file)["text"]).lower()
-        tokens = set(re.findall(r"[a-z']+", text))
-        truth = keyword in tokens
+        tokens = re.findall(r"[a-z']+", text)
+        truth = keyword_in_tokens(tokens, keyword)
         pred = predicted.get(name, False)
         if truth and pred:
             tp += 1

@@ -6,7 +6,11 @@ which is what replaces the hardcoded distance threshold.
 
 Two impostor sources:
   1. random keyword-length windows sampled from the live chunks -
-     domain-matched negatives (speech, music, silence of the actual stream);
+     domain-matched negatives (speech, music, silence of the actual stream),
+     excluding any chunk whose transcript contains the keyword or a stem
+     derivative (the same keyword_free_chunks guard calibrate.py uses), so a
+     real keyword utterance never lands in the cohort the detector normalizes
+     against;
   2. TTS distractor words in random voices - same-domain competition for the
      TTS anchor, so the anchor's synthetic-domain advantage is normalized
      away. Off by default: the pipeline ablation study (ablation_study/)
@@ -29,7 +33,8 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 
 import console as ui
 from scoring import (PROJECT_ROOT, SAMPLE_RATE, anchor_path, cohort_path,
-                     embed_batch, load_siamese_model, sample_stream_windows)
+                     embed_batch, keyword_free_chunks, load_siamese_model,
+                     sample_stream_windows)
 
 DISTRACTOR_WORDS = [
     "people", "because", "through", "before", "little", "world", "right",
@@ -77,8 +82,13 @@ def main():
     ui.kv("TTS distractors", f"{args.tts_words} words" if args.tts else "off")
 
     rng = np.random.default_rng(args.seed)
+    # Same leakage guard as calibrate.py: skip chunks whose transcript holds
+    # the keyword or a stem derivative. With no keyword or no transcripts.txt,
+    # keyword_free_chunks returns every chunk, so this is a no-op there.
+    neg_files = keyword_free_chunks(keyword) if keyword else None
     ui.step(f"sampling {args.stream_windows} random stream windows ...")
-    cohort_audio = sample_stream_windows(window_samples, args.stream_windows, rng)
+    cohort_audio = sample_stream_windows(window_samples, args.stream_windows,
+                                         rng, files=neg_files)
     n_stream = len(cohort_audio)
 
     n_tts = 0
