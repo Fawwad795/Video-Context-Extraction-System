@@ -387,7 +387,7 @@ def spoken_numbers(text):
 
 
 def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
-    """Live chunks whose transcript does not contain the keyword.
+    """Live chunks with a transcript that exists and does not contain the keyword.
 
     Leakage guard for calibration and cohort sampling: negative windows
     sampled from keyword-bearing
@@ -395,6 +395,17 @@ def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
     embedding then puts the false-alarm percentile ABOVE the true-keyword
     score (observed with the v3 trained head: scotland threshold 1.98 vs
     true windows 1.85, the top 2 of 400 "negatives" being the keyword).
+
+    A chunk with NO transcript entry at all is excluded, not defaulted to
+    "keyword-free": on the live platform the downloader never pauses, so by
+    the time calibrate.py runs, audio_dir already holds chunks that arrived
+    after transcribe_chunks.py's one-time bootstrap snapshot - unverified,
+    not known-safe. Defaulting those to safe reopened the exact leak this
+    guard exists to close (observed live: 'executive' calibration threshold
+    was set from an untranscribed chunk that arrived mid-setup and happened
+    to contain the keyword - the offline research pipeline never hits this
+    branch since its transcripts.txt always covers every file already in
+    audio_dir before calibrate.py runs).
     """
     import re
     transcript_path = os.path.join(audio_dir, "transcripts.txt")
@@ -411,7 +422,7 @@ def keyword_free_chunks(keyword, audio_dir=AUDIO_DIR):
                 if keyword.lower() in tokens:
                     contains_kw[current] = True
     files = [f for f in list_chunk_audios(audio_dir)
-             if not contains_kw.get(os.path.basename(f), False)]
+             if contains_kw.get(os.path.basename(f)) is False]
     return files or list_chunk_audios(audio_dir)
 
 

@@ -17,12 +17,14 @@ Architecture: downloading and detection are decoupled.
       the detector. Downloading never pauses for processing.
 
   Main thread - setup phase first (build missing keyword artifacts by
-      invoking the original pipeline scripts as subprocesses):
+      invoking the original pipeline scripts as subprocesses, except
+      transcribe_chunks which runs in-process - see the note below):
         keyword_generator.py     TTS prototype anchor + variants
         (bootstrap wait)         until N chunks have arrived from the stream
-        transcribe_chunks.py     transcribe those N chunks (leakage guard
-                                 for calibration - see step 3 below and the
-                                 "Calibration leakage" note further down)
+        transcribe_chunks()      transcribe those N chunks in-process
+                                 (leakage guard for calibration - see step 3
+                                 below and the "Calibration leakage" note
+                                 further down)
         cohort_builder.py        AS-norm impostor cohort
         calibrate.py             per-keyword detection threshold, using the
                                  transcript to exclude keyword-bearing
@@ -374,7 +376,7 @@ def main():
     ap.add_argument("--root", default=DEFAULT_DATA_ROOT,
                     help="platform data root (isolated from the research folders)")
     ap.add_argument("--weights", default=DEFAULT_WEIGHTS)
-    ap.add_argument("--bootstrap-chunks", type=int, default=10,
+    ap.add_argument("--bootstrap-chunks", type=int, default=15,
                     help="chunks needed up-front for cohort/calibration")
     ap.add_argument("--backlog-cap", type=int, default=300,
                     help="max unprocessed chunks kept on disk before dropping")
@@ -511,11 +513,14 @@ def main():
     # against the same data root (the transcript is keyword-agnostic).
     transcript_file = os.path.join(audio_dir, "transcripts.txt")
     if not os.path.exists(calib_file) and not os.path.exists(transcript_file):
-        run_step("transcribe_chunks.py",
-                 ["--limit", str(args.bootstrap_chunks),
-                  "--out", transcript_file],
-                 f"transcribing the first {args.bootstrap_chunks} bootstrap "
-                 "chunks (one-time, powers the calibration leakage guard)")
+        # In-process, not via run_step()/subprocess: this point in setup has
+        # already imported torch/transformers/librosa (the `from scoring
+        # import` above), so a subprocess would only re-pay that ~40s import
+        # cost from scratch for the exact same work.
+        status(f"Setup: transcribing the first {args.bootstrap_chunks} bootstrap "
+               "chunks (one-time, powers the calibration leakage guard) ...")
+        from transcribe_chunks import transcribe_chunks
+        transcribe_chunks(transcript_file, limit=args.bootstrap_chunks)
 
     # -- 3. Cohort + threshold calibration ----------------------------------
     if not os.path.exists(cohort_file):
