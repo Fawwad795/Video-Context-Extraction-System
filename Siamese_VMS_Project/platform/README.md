@@ -58,28 +58,53 @@ slow, and downloading continues throughout):** synthesize the multi-voice
 TTS anchor → wait until ~10 chunks exist on disk → transcribe those chunks
 (whisper-base, one-time) → build the AS-norm cohort → calibrate the
 detection threshold, using the transcript to exclude any keyword-bearing
-chunk from its negative sample. Later runs with the same keyword (or a new
-keyword against the same downloaded audio) skip whatever's already built.
+chunk from its negative sample → load the phoneme verifier and calibrate
+its accept threshold (cached to `<kw>_phone_cache.json`). Later runs with
+the same keyword (or a new keyword against the same downloaded audio) skip
+whatever's already built.
 
 **Live:** the detector consumes the queue: each chunk is scanned by the
 Siamese AS-norm detector (50 ms hop — must match the calibration window
 grid). For each chunk:
 
-- **detection** → chunk video+audio moved to
-  `data/detections/<keyword>/` with a JSON record of times/scores;
+- **detection** → the phoneme verifier re-checks the detected event in the
+  phone view (see below); if it passes, chunk video+audio move to
+  `data/detections/<keyword>/` with a JSON record of times/scores/phone-sim;
+  if not, the chunk is deleted and the rejection logged with its scores;
 - **no detection** → chunk files deleted immediately,
 
 so disk and memory stay flat during arbitrarily long runs (same
 keep-or-delete policy as the original VMS platform).
 
-The platform ends at detection — it never second-guesses a live match; it
-saves the chunk and moves on. `validate_detection.py` remains an offline
-research tool for measuring accuracy against ground truth, unused by the
-platform. `transcribe_chunks.py` is the one exception on the live side: it
-runs once, on the ~10 bootstrap chunks only, purely so calibration has
-ground truth to exclude the keyword's own utterance from its negative
-sample (see "Calibration leakage guard" below) — the live detection loop
-itself never transcribes anything.
+`validate_detection.py` remains an offline research tool for measuring
+accuracy against ground truth, unused by the platform.
+`transcribe_chunks.py` is the one exception on the live side: it runs
+once, on the ~10 bootstrap chunks only, purely so calibration has ground
+truth to exclude the keyword's own utterance from its negative sample (see
+"Calibration leakage guard" below) — the live detection loop itself never
+transcribes anything.
+
+### Phoneme verifier (precision stage)
+
+The embedding detector confuses phonetic near-neighbours of the keyword: a
+live 'party' session fired on "policy" at AS-norm 8.17 — above real
+keyword hits at 6.13 — so no threshold tweak can separate them, and every
+cheap structural signal (window support count, multi-scale consistency,
+raw cosine) fails with them because they are all functions of the same
+embedding. Each detection is therefore re-checked in a decorrelated view
+(`core/phoneme_verify.py`): the detected event's surroundings (~2.5 s) are
+CTC-decoded to IPA phones (`wav2vec2-lv-60-espeak-cv-ft`) and matched
+against phone references decoded from the keyword's own TTS anchor
+variants (bad TTS renders are dropped by a leave-one-out agreement
+filter). The chunk survives only if the keyword's phones are actually
+present (infix match, so derivatives like "parties" pass). The accept
+threshold is calibrated per keyword against keyword-free stream audio and
+cached. Verification runs only when something fired — per-chunk cost is
+zero otherwise. Set `SIAMESE_PHONE_VERIFY=0` to disable.
+
+On the validating 'party' session this kept 9/9 real keyword chunks
+(phone-sim 1.00) and rejected all 3 confusables ("policy platform",
+"publicly", "public", phone-sim 0.25) at auto-calibrated tau 0.75.
 
 ### Calibration leakage guard
 

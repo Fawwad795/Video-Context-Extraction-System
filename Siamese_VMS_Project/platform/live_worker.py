@@ -545,6 +545,50 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
+    # -- 4.5 Phoneme verifier (precision stage) ------------------------------
+    # The embedding confuses phonetic near-neighbours ('party' fired on
+    # "policy" at AS-norm 8.17 - above real hits); no threshold separates
+    # them, so verified detections are re-checked in the decorrelated phone
+    # view (core/phoneme_verify.py). Refs + tau are cached per keyword;
+    # per-chunk cost is zero unless a detection fires.
+    # SIAMESE_PHONE_VERIFY=0 disables.
+    phone = None
+    if os.environ.get("SIAMESE_PHONE_VERIFY", "1") != "0":
+        import numpy as _np
+        import phoneme_verify as pv
+        from scoring import keyword_free_chunks
+        status(f"Loading phoneme verifier ({pv.PHONEME_MODEL.split('/')[-1]}) ...")
+        pv_processor, pv_model, pv_torch = pv.load_phoneme_model()
+        cache_path = os.path.join(data_root, "keywords",
+                                  f"{keyword}_phone_cache.json")
+        cached = pv.load_phone_cache(cache_path)
+        if cached:
+            refs, tau = cached
+            status(f"Phoneme refs + tau loaded from cache "
+                   f"({len(refs)} refs, tau={tau:.2f})")
+        else:
+            status("Building phoneme references from anchor variants ...")
+            variants_dir = os.path.join(data_root, "keywords",
+                                        f"{keyword}_variants")
+            refs, loo_mean = pv.build_references(
+                keyword, variants_dir, pv_processor, pv_model, pv_torch,
+                log=lambda m: status(f"  {m}"))
+            if refs:
+                status("Calibrating phone accept threshold on keyword-free "
+                       "chunks (one-time, ~2 min) ...")
+                tau = pv.calibrate_tau(
+                    refs, loo_mean, window_seconds, keyword_free_chunks(keyword),
+                    pv_processor, pv_model, pv_torch,
+                    _np.random.default_rng(777),
+                    log=lambda m: status(f"  {m}"))
+                pv.save_phone_cache(cache_path, keyword, refs, tau, loo_mean)
+                status(f"Phoneme verifier ready (tau={tau:.2f}, cached)")
+        if cached or refs:
+            phone = (refs, tau, pv_processor, pv_model, pv_torch, pv)
+        else:
+            status("No usable phoneme references - verifier disabled "
+                   "for this session")
+
     # -- 5. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
     emit("PHASE", "live")
@@ -560,8 +604,32 @@ def main():
         y, _ = librosa.load(audio_path, sr=SAMPLE_RATE)
         scan = scan_chunk(y, model, anchor, cohort, window_samples,
                           threshold, SAMPLE_RATE, DEFAULT_TOP_K)
-        del y
         detections = scan["detections"] if scan is not None else []
+
+        # Precision stage: confirm the keyword's phones are actually in the
+        # audio before keeping the chunk. Runs only when something fired.
+        phone_sim = None
+        if detections and phone is not None:
+            refs, tau, pv_processor, pv_model, pv_torch, pv = phone
+            ok, phone_sim = pv.verify_chunk(
+                y, detections, window_seconds, refs, tau,
+                pv_processor, pv_model, pv_torch)
+            if not ok:
+                top = detections[0]
+                status(f"{name}: rejected confusable at {top['time']:.1f}s "
+                       f"(AS-norm {top['score']:.2f} but phone-sim "
+                       f"{phone_sim:.2f} < tau {tau:.2f}) - chunk deleted")
+                with open(live_log, "a", encoding="utf-8") as f:
+                    f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] REJECTED "
+                            f"'{keyword}' in {name}: AS-norm "
+                            f"{top['score']:.2f}, phone-sim {phone_sim:.2f} "
+                            f"< tau {tau:.2f}\n")
+                del y
+                for p in (audio_path, video_path):
+                    if os.path.exists(p):
+                        os.remove(p)
+                return
+        del y
 
         if detections:
             total_detected += len(detections)
@@ -577,11 +645,14 @@ def main():
                            "detected_at": datetime.now().isoformat(timespec="seconds"),
                            "threshold": threshold,
                            "best_score": scan["best_score"],
+                           "phone_sim": phone_sim,
                            "detections": detections}, f, indent=2)
             top = detections[0]
+            phone_note = (f", phone-sim {phone_sim:.2f}"
+                          if phone_sim is not None else "")
             msg = (f"MATCH '{keyword}' in {name} at {top['time']:.1f}s "
-                   f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}) "
-                   f"-> saved {base}.mp4")
+                   f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}"
+                   f"{phone_note}) -> saved {base}.mp4")
             with open(live_log, "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
             status(msg)

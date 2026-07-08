@@ -345,6 +345,70 @@ Unlike every reverted approach, this doesn't degrade as the keyword
 recurs more often - exclusion is by content, not by order statistics on
 a bounded sample.
 
+## Phonetic confusables and the verifier resurrection (2026-07-07/08)
+
+Three consecutive live platform sessions (keywords 'world', 'russia',
+'party'; every fired chunk transcript-verified with whisper-base, English
+forced, plus windowed re-transcription of each suspected false positive)
+established a consistent failure signature: **true hits clear the
+calibrated threshold comfortably while false positives enter within ~1
+unit of it** — world 2 FP (3.93/4.09 vs thr 3.79, TPs >= 4.70), russia
+4 FP (2.92-3.67 vs thr 2.65, TPs >= 4.93). The gap-based safety margin
+(commit ae3dffe) was fitted to exactly that band.
+
+The 'party' session (272 chunks, margin active, thr 4.701 = base 3.394 +
+1.307) broke the pattern: 9 detections = 6 TP / 3 FP, and FP "policy"
+scored **8.17 — above the real TP at 6.13**. The confusables were all
+phonetic near-neighbours ("policy" x2, "publicly", "public" vs /pɑɹti/).
+No threshold can separate overlapping bands, and every cheap structural
+signal fails with the embedding score because it is a function of the same
+embedding: the 8.17 "policy" FP had MORE windows above threshold (33 vs 7),
+MORE scales (3 vs 2), and HIGHER raw cosine (0.717 vs 0.553) than the
+weakest real TP. Session recall was 6/6 (three apparent misses turned out
+to be chunks downloaded after the session stopped, never scanned; re-scanned
+they score 8.5-9.8 and are real mentions).
+
+**Fix: resurrect the Stage-3 phoneme verifier** (removed in df141b4 when
+the trained head made it unnecessary for *recall* on Set D — the live
+confusable regime is where its *precision* role was needed), with three
+changes over the retired design, each forced by measured failures:
+
+1. **Reference outlier filter.** The ksp TTS voice renders 'party' as
+   /ph ɑ l i/ — a reference that would MATCH "policy". Leave-one-out
+   agreement (drop refs < 0.5 vs the rest) removes it automatically
+   (agreement 0.25 vs 1.00 for the other six voices).
+2. **Wide-span decode instead of per-window probing.** The old
+   narrow-window scheme (window + 0.08 s pad, +/-100 ms probes) clips word
+   edges (TP live_44 decoded /p ɑu5 ɕ i5/ at its top window) and hands
+   confusables a decode-noise lottery — "policy" hit 0.75 once across 147
+   narrow decodes, and reproducibly in 17. Decoding ONE ~2.5 s span per
+   detection event (detections time-clustered at 0.3 s gap) gives the CTC
+   full acoustic context: every TP decodes a clean /p ɑːɹ ɾ i/ in-context
+   (all 1.00), every confusable decodes as itself — /p ɔ l ə s i/,
+   /p ʌ b l ɪ k/ (all 0.25). The infix matcher's free ends make the
+   surrounding words cost nothing and accept derivatives (/p ɑːɹ ɾ i z/).
+3. **tau calibration mirrors the decision statistic** (max over ~2 wide
+   decodes of keyword-free stream audio per draw), midpoint to the refs'
+   LOO self-similarity, floored at 0.6 → party tau 0.75.
+
+End-to-end on the party session with the production code
+(`core/phoneme_verify.py`, wired into `platform/live_worker.py` and
+`pipeline/verify_detections.py`): **12/12 chunks correct** — 9 real
+keyword chunks kept at phone-sim 1.00 (6 fired + the 3 late unscanned
+ones re-run as future detections), 3 confusables rejected at 0.25.
+
+A ground-truth correction the verifier itself surfaced: whisper-base
+transcribes live_115 as "any political **policy** in the country", but
+whisper-small, wav2vec2-base-960h (char CTC) and the espeak phone CTC all
+hear "political **party**" — consistent with its 8.17 embedding score.
+Chunk-level metrics that use a single ASR model as ground truth inherit
+that model's confusions.
+
+Cost: verifier model (~1.2 GB wav2vec2-large) loads once at setup; refs +
+tau are cached per keyword (`keywords/<kw>_phone_cache.json`); at
+detection time one CTC decode per event, only on chunks that fired.
+`SIAMESE_PHONE_VERIFY=0` disables the platform stage.
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
@@ -388,6 +452,20 @@ a bounded sample.
    restoring the transcript-based guard the offline pipeline always had,
    via one cheap one-time whisper-base transcription of just the
    bootstrap window.
+8. **Phonetic confusables overlap the keyword in embedding space, and only
+   a decorrelated view separates them.** Live 'party' monitoring fired on
+   "policy" at AS-norm 8.17 - above a real keyword hit at 6.13 - and the
+   confusable beat the weakest true hit on every embedding-derived signal
+   (window support, scale consistency, raw cosine). The phone-sequence
+   view separates them perfectly (true chunks 1.00, confusables 0.25)
+   because CTC phone labels are supervised against phone identity, the
+   one thing the confusable actually lacks. Two implementation details
+   carry the result: decode a wide (~2.5 s) span per detection event
+   rather than probing narrow windows (context stabilizes the CTC and
+   removes the confusable's decode-noise lottery), and drop TTS reference
+   decodes that disagree with the voice consensus (one accented voice
+   rendered 'party' as /ph ɑ l i/ - a reference that would have matched
+   the very confusable the verifier exists to reject).
 
 ## Artifact map (post-cleanup, 2026-07-02)
 

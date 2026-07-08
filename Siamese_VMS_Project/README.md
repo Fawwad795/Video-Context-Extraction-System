@@ -156,11 +156,23 @@ $$
   per-window embedding).
 - **Threshold:** `pipeline/calibrate.py` — max score on keyword-free windows
   embedded through the **same detector protocol** (chunk context, all scales,
-  50 ms grid). Defaults to `--fa-percentile 100 --negatives 40000` (the
-  trained-head operating point); negatives are drawn only from chunks that do
-  not contain the keyword (transcript token check). The live platform
-  (no pre-existing transcript) produces one itself — see
+  50 ms grid), plus a gap-based safety margin (`--safety-margin`, default
+  0.2) toward the positive centre. Defaults to `--fa-percentile 100
+  --negatives 40000` (the trained-head operating point); negatives are drawn
+  only from chunks that do not contain the keyword (transcript token check,
+  word-family aware). The live platform (no pre-existing transcript)
+  produces one itself — see
   [`platform/README.md`](platform/README.md#calibration-leakage-guard).
+- **Phoneme verification:** `pipeline/verify_detections.py` /
+  `core/phoneme_verify.py` — detections are re-checked in a decorrelated
+  view before being accepted: a ~2.5 s span around the detected event is
+  CTC-decoded to IPA phones (`wav2vec2-lv-60-espeak-cv-ft`) and matched
+  (infix edit distance) against references decoded from the keyword's own
+  TTS variants. This is what separates phonetic confusables the embedding
+  cannot ("policy"/"public" firing for *party* at scores above real hits);
+  refs + per-keyword accept threshold are cached in
+  `keywords/<kw>_phone_cache.json`. `SIAMESE_PHONE_VERIFY=0` disables it on
+  the platform.
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
@@ -253,7 +265,8 @@ Siamese_VMS_Project/
 | 4 | `cohort_builder.py` | `cohort_<kw>*.npz` |
 | 5 | `calibrate.py` | `*_calibration*.json` |
 | 6 | `detector.py` | `logs/detections_<kw>.json` |
-| 7 | `validate_detection.py` | P / R / F1 vs transcripts |
+| 7 | `verify_detections.py` | phone-verified detections JSON (+ `_phone_cache.json`) |
+| 8 | `validate_detection.py` | P / R / F1 vs transcripts |
 
 ## Model Training (Offline, AWS)
 
@@ -304,7 +317,12 @@ $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```bash
    python pipeline/detector.py --keyword cloudy
    ```
-7. **Validate:**
+7. **Phone-verify detections** (drops phonetic confusables; rewrites the
+   detections JSON, original backed up as `*_unverified.json`):
+   ```bash
+   python pipeline/verify_detections.py --keyword cloudy
+   ```
+8. **Validate:**
    ```bash
    python pipeline/validate_detection.py --keyword cloudy
    ```

@@ -42,6 +42,7 @@ Siamese_VMS_Project/
 │   ├── siamese_model.py   the legacy ("baseline") embedding model
 │   ├── embedders.py       the WavLM-based embedding backends (current default)
 │   ├── scoring.py         AS-norm scoring math, paths, config, env vars
+│   ├── phoneme_verify.py  phone-sequence verification of detections
 │   └── augment_utils.py   audio distortion effects (pitch/tempo/reverb/noise)
 │
 ├── pipeline/          the offline, step-by-step research pipeline (run as scripts)
@@ -51,6 +52,7 @@ Siamese_VMS_Project/
 │   ├── cohort_builder.py      → impostor cohort embeddings
 │   ├── calibrate.py           → decision threshold
 │   ├── detector.py            → scans chunks, writes detections
+│   ├── verify_detections.py   → phone-verifies detections (precision)
 │   └── validate_detection.py  compares detections against transcripts
 │
 ├── platform/          the live-monitoring desktop app (wraps the pipeline above)
@@ -344,15 +346,16 @@ stateDiagram-v2
    - waits until roughly `--bootstrap-chunks` (default 10) chunks have accumulated from the downloader thread;
    - runs `transcribe_chunks.py --limit <bootstrap-chunks>` **once**, producing a `transcripts.txt` for just that bootstrap window — this is what lets the calibration leakage guard (§9/§12) function on a live stream that has no pre-existing transcript;
    - runs `cohort_builder.py` and `calibrate.py` as subprocesses (each skipped if their output already exists);
-   - loads the model, anchor, cohort, and threshold **in-process** (not as a subprocess) for use in the next phase.
+   - loads the model, anchor, cohort, and threshold **in-process** (not as a subprocess) for use in the next phase;
+   - loads the phoneme verifier and calibrates its per-keyword accept threshold (cached to `<keyword>_phone_cache.json`; skipped when the cache exists — see below).
 3. **`live`** — an endless loop. The downloader thread's backlog policy switches from "pause accepting new segments once the queue is full" to "drop the oldest unprocessed chunk once the queue is full," keeping the monitor close to real time. For every chunk that arrives:
    - it's scanned using `scan_chunk()`, an in-process port of the same multi-scale, AS-norm-based scanning logic as `detector.py` (§10), using the same 50ms hop;
-   - **if any window clears the threshold:** the chunk's audio and video files are **moved** into `platform/data/detections/<keyword>/`, alongside a JSON record of the detection times/scores, and the running detection count is announced (`@@DETECT <n>`);
+   - **if any window clears the threshold:** the detection is re-checked by the phoneme verifier (below); if it passes, the chunk's audio and video files are **moved** into `platform/data/detections/<keyword>/`, alongside a JSON record of the detection times/scores/phone-similarity, and the running detection count is announced (`@@DETECT <n>`); if it fails, the chunk is deleted and the rejection logged with both scores;
    - **if nothing clears the threshold:** the chunk's audio and video files are simply **deleted** from disk.
    
    This keep-or-delete policy means disk usage stays flat no matter how long a session runs. One additional detail: every downloaded chunk is *also* copied (before this keep/delete decision is made) into a separate `platform/data/audios_copy/` folder, which is never cleaned up — a standing, manually browsable archive of every chunk that was ever downloaded, independent of what the detector decided to do with the original.
 
-The platform's decision-making stops at this single AS-norm threshold check — it does not run any secondary confirmation pass, and it never invokes `validate_detection.py` (that script remains an offline-only tool).
+**The phoneme verifier** (`core/phoneme_verify.py`) is the second, independent check a detection must pass before being saved. Why it exists: the embedding sometimes scores a *phonetically similar* word (e.g. "policy" when hunting "party") as high as the keyword itself, and every embedding-derived signal fails together on such confusables — so the confirmation has to come from a genuinely different information source. The verifier CTC-decodes a ~2.5-second span of audio around the detected event into a sequence of IPA phones (using a separate pretrained phoneme-recognition model, `wav2vec2-lv-60-espeak-cv-ft`) and compares that sequence against reference phone sequences decoded from the keyword's own TTS anchor clips (a leave-one-out agreement filter first discards any badly-rendered TTS reference). The comparison is an "infix" edit-distance match — the reference only has to appear as a substring of the decoded span, so neighbouring words cost nothing and suffixed forms ("parties") still match. A chunk is kept only if this phone similarity reaches the per-keyword calibrated threshold; otherwise it is deleted like a no-match. The stage runs only when a detection fires (no cost on ordinary chunks) and can be disabled with `SIAMESE_PHONE_VERIFY=0`. The platform never invokes `validate_detection.py` (that script remains an offline-only tool).
 
 ### 14.4 The GUI itself
 
@@ -461,6 +464,7 @@ python pipeline/keyword_generator.py --keyword <word>   # -> keywords/<word>_anc
 python pipeline/cohort_builder.py --keyword <word>       # -> keywords/cohort_<word>*.npz
 python pipeline/calibrate.py --keyword <word>            # -> keywords/<word>_calibration*.json
 python pipeline/detector.py --keyword <word>             # -> logs/detections_<word>.json
+python pipeline/verify_detections.py --keyword <word>    # phone-verifies detections (rewrites the JSON)
 python pipeline/validate_detection.py --keyword <word>   # compares detections vs. transcript
 ```
 
