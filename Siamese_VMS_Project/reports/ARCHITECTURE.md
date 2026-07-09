@@ -91,16 +91,17 @@ flowchart TD
 
     subgraph S2["Stage 2 — Detection"]
         direction TB
-        CB["cohort_builder.py\n(builds impostor cohort)"]
+        CB["cohort_builder.py\n(builds impostor cohort from\nkeyword-free chunks)"]
         CAL["calibrate.py\n(sets decision threshold,\nuses anchor + cohort)"]
         DET["detector.py\n(slides windows over each chunk,\nembeds them, scores vs anchor\nwith AS-norm, flags windows\nover threshold)"]
         CB --> CAL --> DET
     end
 
-    DET --> OUT["logs/detections_&lt;keyword&gt;.json"]
+    DET --> VER["verify_detections.py\n(phoneme verification:\nconfirms the keyword's phones\nare actually in the audio)"]
+    VER --> OUT["logs/detections_&lt;keyword&gt;.json\n(phone-verified)"]
 ```
 
-Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
+Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The phoneme-verification step at the end re-checks each detection through an independent view — the phone sequence — because the embedding alone can confuse similar-sounding words (§14.3 describes the mechanism; the same module gates the live platform's detections). The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
 
 ---
 
@@ -111,15 +112,15 @@ This script takes nothing but a keyword string and produces one embedding vector
 **Step 1 — synthesize the word in many voices.** It uses Microsoft's **SpeechT5** text-to-speech model (plus its **HiFi-GAN** vocoder, which turns SpeechT5's internal representation into an actual waveform) to speak the keyword out loud, repeatedly, in different voices:
 - **7 canonical voices** — fixed speaker identities from the `CMU ARCTIC` voice dataset (a public collection of "x-vectors," which are numeric voice-identity fingerprints that SpeechT5 uses to decide *who* is speaking).
 - **`--n-random` extra voices** — random rows picked from the same voice dataset.
-- **`--n-blend` "blended" voices** — two random voices are mixed together via linear interpolation, `blend = α·voice_1 + (1-α)·voice_2` with `α` randomly between 0.3 and 0.7. This produces a voice that doesn't correspond to any real speaker, widening the variety of "accents" the anchor has seen.
+- **`--n-blend` "blended" voices** — two random voices are mixed together via linear interpolation, $\text{blend} = \alpha \cdot \text{voice}_1 + (1-\alpha) \cdot \text{voice}_2$ with $\alpha \sim \mathrm{Uniform}(0.3, 0.7)$. This produces a voice that doesn't correspond to any real speaker, widening the variety of "accents" the anchor has seen.
 
 Each synthesized clip is cached to disk (`keywords/<keyword>_variants/`) so re-runs don't re-synthesize existing voices.
 
-**Step 2 — clean up degenerate synthesis.** TTS models occasionally fail — producing near-silence or a "babbling" repeated loop. The script trims silence from every clip, discards anything under 0.15 seconds, and also discards any clip whose length is more than 1.8× the *median* clip length (a cheap way to catch runaway/looping synthesis without needing a human to check each one).
+**Step 2 — clean up degenerate synthesis.** TTS models occasionally fail — producing near-silence or a "babbling" repeated loop. The script trims silence from every clip, discards anything under 0.15 seconds, and also discards any clip whose length is more than $1.8\times$ the *median* clip length (a cheap way to catch runaway/looping synthesis without needing a human to check each one).
 
 **Step 3 — augment.** Each surviving clean clip is copied `--n-augment` times (default 2) through `core/augment_utils.py`'s `augment_audio()` function, which randomly (each independently gated by its own coin-flip) applies:
-- pitch shift (±1.5 semitones),
-- time-stretch (0.88×–1.12× speed),
+- pitch shift ($\pm 1.5$ semitones),
+- time-stretch ($0.88\times$–$1.12\times$ speed),
 - a synthetic room echo (an artificial decaying-noise "impulse response" convolved with the signal, with a random reverberation time and wet/dry mix),
 - a low-pass filter (simulating band-limited/telephone-like audio), and
 - always: additive background noise at a randomized signal-to-noise ratio, followed by peak normalization.
@@ -178,14 +179,14 @@ A raw cosine similarity between a window and the anchor isn't, by itself, a good
 
 The function `asnorm_windows(window_embs, anchor, cohort, top_k=50)` works like this:
 
-1. Compute the raw cosine similarity `s` of each test window against the anchor (a simple dot product, since embeddings are unit length).
-2. **Anchor-side statistics:** score every cohort (impostor) member against the anchor too, take the **top-k** closest impostors (default 50), and compute their mean `μ_a` and standard deviation `σ_a`. This describes "how easily this specific anchor gets confused by impostors in general."
-3. **Window-side statistics:** for *this specific test window*, score it against every cohort member, take the top-k closest, and compute `μ_w`/`σ_w`. This describes "how easily this specific moment of audio resembles impostors."
+1. Compute the raw cosine similarity $s$ of each test window against the anchor (a simple dot product, since embeddings are unit length).
+2. **Anchor-side statistics:** score every cohort (impostor) member against the anchor too, take the **top-k** closest impostors (default 50), and compute their mean $\mu_a$ and standard deviation $\sigma_a$. This describes "how easily this specific anchor gets confused by impostors in general."
+3. **Window-side statistics:** for *this specific test window*, score it against every cohort member, take the top-k closest, and compute $\mu_w$ / $\sigma_w$. This describes "how easily this specific moment of audio resembles impostors."
 4. Combine both views into a final normalized score:
 
-   ```
-   s_norm = 0.5 · ( (s − μ_a) / σ_a  +  (s − μ_w) / σ_w )
-   ```
+$$
+s_{\text{norm}} = \frac{1}{2}\left(\frac{s - \mu_a}{\sigma_a} + \frac{s - \mu_w}{\sigma_w}\right)
+$$
 
 Only the **top-k** closest impostors are used (rather than the whole cohort's mean/std) — this is what makes the normalization "adaptive": each individual anchor or window gets compared against its own nearest confusable neighbors rather than a single fixed population-wide baseline.
 
@@ -199,7 +200,7 @@ The window-embedding step that feeds into this formula has an important detail f
 
 The **cohort** is the reference population of "not the keyword" embeddings that AS-norm compares against. Building it is simple by design:
 
-1. **Real-audio windows:** the script randomly slices `--stream-windows` (default 50) windows — each the same duration as the anchor's window — out of whatever chunks currently exist in the audio directory, with no attempt to check whether the keyword happens to be present in the slice.
+1. **Real-audio windows:** the script randomly slices `--stream-windows` (default 50) windows — each the same duration as the anchor's window — out of the chunks in the audio directory, restricted to chunks whose transcript does **not** contain the keyword (the same `keyword_free_chunks()` guard calibration uses, §12), so a real keyword utterance can never end up inside the impostor population the detector normalizes against.
 2. **(Optional) TTS distractor words:** if `--tts` is passed, it synthesizes `--tts-words` (default 50) *other* common English words via the same TTS machinery `keyword_generator.py` uses, explicitly excluding the actual keyword from that word list.
 3. Every resulting clip is embedded and L2-normalized, and the whole set is saved to `keywords/cohort_<keyword><suffix>.npz`.
 
@@ -212,10 +213,17 @@ A cohort is built **per keyword** (not shared across keywords) because its windo
 Calibration answers: "given the anchor and the cohort, what raw AS-norm score should count as a detection?"
 
 1. Load the anchor's `centroid` and `positives` (the holdout voice embeddings from §5) and the cohort.
-2. Draw a large number of **negative** windows (`--negatives`, default 40000) from the real audio — but only from chunks confirmed *not* to contain the keyword. This is where the **transcript-based leakage guard** comes in: a helper function, `keyword_free_chunks()`, reads `transcripts.txt` (produced by `transcribe_chunks.py`, §12) and excludes any chunk whose transcript contains the keyword as a token, so the "negative" sample can't accidentally include a real occurrence of the keyword scoring against itself.
+2. Draw a large number of **negative** windows (`--negatives`, default 40000) from the real audio — but only from chunks confirmed *not* to contain the keyword. This is where the **transcript-based leakage guard** comes in: a helper function, `keyword_free_chunks()`, reads `transcripts.txt` (produced by `transcribe_chunks.py`, §12) and excludes any chunk whose transcript contains the keyword *or a word from its family* (stem-based matching: "healthy"/"healthier" count as "health", "presidential" counts as "president" — since a derivative contains the keyword's sound, sampling it as a "negative" would poison the threshold just like the keyword itself). Chunks with no transcript entry at all are also excluded, not assumed safe.
 3. Score both the positive set and the negative set through the exact same AS-norm formula (§7) using the exact same chunk-context window-pooling procedure the live detector will later use.
-4. **Set the threshold:** take a percentile of the negative-score distribution — by default the **100th percentile, i.e. the single highest score any negative window achieved** — and add a tiny epsilon (`+1e-4`). The percentile choice (rather than, say, "mean + 3 standard deviations") is deliberate: the negative-score distribution is heavily skewed by quiet/musical windows creating a long low-scoring tail, which breaks simple mean/standard-deviation rules. The epsilon exists purely to survive tiny floating-point differences (~1e-7) between two separately-computed instances of what is mathematically the same window score, so a legitimate negative can't trip the threshold by numerical noise alone.
-5. Save `keyword, threshold, fa_percentile, top_k, window_samples`, plus assorted diagnostic statistics, to `keywords/<keyword>_calibration<suffix>.json`.
+4. **Set the base threshold:** take a percentile of the negative-score distribution — by default the **100th percentile, i.e. the single highest score any negative window achieved**. The percentile choice (rather than, say, "mean + 3 standard deviations") is deliberate: the negative-score distribution is heavily skewed by quiet/musical windows creating a long low-scoring tail, which breaks simple mean/standard-deviation rules.
+5. **Add a safety margin** (`--safety-margin`, default $k = 0.2$): the calibration negatives are a finite sample, so their maximum underestimates how high a non-keyword window can score over hours of live audio — fresh negatives poke just above the base at detection time. The margin pushes the threshold a fixed fraction of the way from the base toward the **positive centre** (the median of the held-out positive scores):
+
+$$
+\text{threshold} = \text{base} + k \cdot \max\bigl(0,\ \mathrm{median}(\text{pos}) - \text{base}\bigr) + \varepsilon
+$$
+
+   Because the margin is a fraction of the *gap to the positives*, it adapts per keyword, always stays below the positives (recall preserved), and collapses to zero if positives overlap negatives. The tiny $\varepsilon = 10^{-4}$ exists purely to survive floating-point jitter ($\sim 10^{-7}$) between two computations of what is mathematically the same window score.
+6. Save `keyword, threshold, base_threshold, safety_margin, fa_percentile, top_k, window_samples`, plus assorted diagnostic statistics, to `keywords/<keyword>_calibration<suffix>.json`.
 
 ---
 
@@ -224,7 +232,7 @@ Calibration answers: "given the anchor and the cohort, what raw AS-norm score sh
 This is the script that actually decides, for each incoming chunk, whether the keyword occurred.
 
 1. **Load everything:** the model, the anchor embedding + its window length, the cohort, and the calibrated threshold (or a command-line override, or a hardcoded fallback of 2.5 if no calibration file exists at all).
-2. **Multi-scale sliding window.** Rather than scanning at one fixed window size, the detector scans at **three window sizes simultaneously** — 0.6×, 0.8×, and 1.0× of the anchor's own window length (configurable via `--scales`) — since real speech doesn't say a word at a perfectly fixed duration every time. Each scale is floored at a minimum of 0.15 seconds.
+2. **Multi-scale sliding window.** Rather than scanning at one fixed window size, the detector scans at **three window sizes simultaneously** — $0.6\times$, $0.8\times$, and $1.0\times$ of the anchor's own window length (configurable via `--scales`) — since real speech doesn't say a word at a perfectly fixed duration every time. Each scale is floored at a minimum of 0.15 seconds.
 3. **Hop size.** Windows are spaced every `--step` seconds apart (default **0.05s / 50ms**) rather than sliding sample-by-sample. This value must match what `calibrate.py` used when it fit the threshold — the threshold is only meaningful against the exact sampling grid it was calibrated on.
 4. **Scoring.** Every window at every scale is embedded (using the fast whole-chunk-then-pool path described in §7, for the WavLM backends) and scored against the anchor via AS-norm.
 5. **Decision.** Every window across every scale whose AS-norm score meets or exceeds the threshold is recorded as a detection — there is **no merging/de-duplication step** here: if three overlapping windows from adjacent hop positions all clear the threshold, all three are recorded as separate detection entries in the output.
@@ -250,9 +258,9 @@ Every later stage locates chunk files through this exact `live_<N>.wav` naming c
 
 Transcription plays a supporting role in this project — it is never the primary detection mechanism, but it's used in two places:
 
-**As ground truth.** Running Whisper (an off-the-shelf speech-to-text model, `openai/whisper-base` by default) over every chunk produces a `transcripts.txt` file that other tools use to check the detector's output (§13) or to sweep parameters (§16).
+**As ground truth.** Running Whisper (an off-the-shelf speech-to-text model, `openai/whisper-tiny` by default, overridable via `--model`) over every chunk produces a `transcripts.txt` file that other tools use to check the detector's output (§13) or to sweep parameters (§16).
 
-**As a leakage guard for calibration.** Recall from §9 that calibration deliberately needs negative (keyword-free) windows. Doing that safely requires actually knowing which chunks contain the keyword — which is exactly what a transcript provides. `whisper-base` (rather than a smaller/faster model) is used specifically here because a *missed* word in this transcript would silently let a keyword-containing chunk slip through as a "negative," undermining the very thing this guard exists to prevent.
+**As a leakage guard for calibration.** Recall from §9 that calibration deliberately needs negative (keyword-free) windows. Doing that safely requires actually knowing which chunks contain the keyword — which is exactly what a transcript provides. A caveat the code documents openly: a word the transcription *misses* silently reintroduces the exact leak this guard exists to prevent, and no cached Whisper size fully eliminates mis-hearings on noisy live audio — the tiny default is a deliberate speed-over-accuracy tradeoff, not a claim of perfection.
 
 **A text-normalization detail worth knowing:** Whisper renders spoken numbers using ordinary written-digit form (e.g. "2026," "50") even though only words were ever spoken. Since every consumer of a transcript in this project matches words via a letters-only regex, a keyword that happens to be a number word (e.g. "seven") would never match a transcript rendering it as "7." A helper, `spoken_numbers()` (in `core/scoring.py`, using the `num2words` package), converts every digit run in a transcript into its spelled-out word form — handling plain integers ("2026" → "two thousand twenty-six"), decimals ("3.14" → "three point one four"), and ordinals ("21st" → "twenty-first") — and is applied once, at transcription time, so every downstream reader only ever sees words.
 
@@ -265,7 +273,7 @@ Transcription plays a supporting role in this project — it is never the primar
 <transcript text>
 ...
 ```
-The leakage-guard function, `keyword_free_chunks()`, parses exactly this format: it reads each chunk's block, lowercases and tokenizes the words (letters and apostrophes only), and flags any chunk whose token set contains the keyword — those chunks are excluded from negative sampling. (If literally every chunk contains the keyword, the guard falls back to using the full unfiltered set rather than returning nothing.)
+The leakage-guard function, `keyword_free_chunks()`, parses exactly this format: it reads each chunk's block, lowercases and tokenizes the words (letters and apostrophes only), and flags any chunk containing a word from the keyword's **family** — the matcher (`keyword_in_tokens()`) Porter-stems the keyword and accepts any token equal to the keyword or starting with the stem (so "healthy"/"healthier" flag a "health" chunk, "presidential" flags a "president" chunk; a $\geq 4$-character floor on the stem stops short keywords like "art" or "cat" from over-matching "article"/"category"). Flagged chunks, **and chunks with no transcript entry at all** (on the live platform, chunks keep arriving after the one-time bootstrap transcription, so an untranscribed chunk is unverified rather than known-safe), are excluded from negative sampling. If the filter removes everything, the guard falls back to the full unfiltered set rather than returning nothing.
 
 ---
 
@@ -274,7 +282,7 @@ The leakage-guard function, `keyword_free_chunks()`, parses exactly this format:
 This script is a comparison tool, used only in the offline research pipeline (the live platform never calls it).
 
 1. Load `logs/detections_<keyword>.json` (from §10) and reduce it to one boolean per chunk: did *any* window in that chunk clear the threshold?
-2. Independently transcribe every chunk with Whisper (`whisper-tiny` — a separate, faster model than the one used for the calibration guard), normalize numbers with `spoken_numbers()`, tokenize, and check whether the keyword appears as an exact word token anywhere in that chunk's transcript.
+2. Independently transcribe every chunk with Whisper (`whisper-tiny`), normalize numbers with `spoken_numbers()`, tokenize, and check whether a word from the keyword's family appears anywhere in that chunk's transcript — the same `keyword_in_tokens()` stem-based matcher the calibration guard uses (§12), so calibration and validation agree on what "this chunk contains the keyword" means (otherwise a correct detection of "healthy" while hunting "health" would be scored as a false alarm).
 3. Compare the two booleans per chunk (detector said yes/no vs. transcript says yes/no) and tally them into the four standard categories of a confusion matrix.
 4. Compute precision, recall, and F1 from those tallies using the standard formulas, and print a per-chunk table plus the aggregate numbers.
 
@@ -343,8 +351,8 @@ stateDiagram-v2
 1. **`download`** — a dedicated background thread (`StreamDownloader`) starts pulling stream segments *immediately*, using the same URI-then-content-hash de-duplication as `downloader.py` (§11), independent of whether a keyword has been chosen yet. The main thread blocks waiting for a `"KEYWORD <word>"` line to arrive on stdin.
 2. **`setup`** — once a keyword is known: 
    - runs `keyword_generator.py` as a subprocess to build the TTS anchor (skipped if one already exists on disk for this keyword);
-   - waits until roughly `--bootstrap-chunks` (default 10) chunks have accumulated from the downloader thread;
-   - runs `transcribe_chunks.py --limit <bootstrap-chunks>` **once**, producing a `transcripts.txt` for just that bootstrap window — this is what lets the calibration leakage guard (§9/§12) function on a live stream that has no pre-existing transcript;
+   - waits until `--bootstrap-chunks` (default 15) chunks have accumulated from the downloader thread;
+   - transcribes just that bootstrap window **once** (calling `transcribe_chunks()` in-process rather than as a subprocess, to avoid re-paying the heavy library import cost), producing a `transcripts.txt` — this is what lets the calibration leakage guard (§9/§12) function on a live stream that has no pre-existing transcript;
    - runs `cohort_builder.py` and `calibrate.py` as subprocesses (each skipped if their output already exists);
    - loads the model, anchor, cohort, and threshold **in-process** (not as a subprocess) for use in the next phase;
    - loads the phoneme verifier and calibrates its per-keyword accept threshold (cached to `<keyword>_phone_cache.json`; skipped when the cache exists — see below).
@@ -392,7 +400,13 @@ flowchart LR
 This is what produces the `baseline` backend's head (§6.1).
 
 - **Data:** `SpeechTripletDataset` draws examples from `MLCommons/ml_spoken_words`, a large public dataset of individually-spoken words from many speakers. For each training example it picks a random word class, then samples two *different* recordings of that same word (**anchor** and **positive** — same word, different speaker/utterance) plus one recording of a *different*, randomly chosen word (**negative**). Every clip is forced to exactly 1 second (truncated or zero-padded).
-- **Loss — triplet margin loss:** the frozen backbone + trainable head embeds all three clips; the loss pushes the anchor closer to the positive and further from the negative, in Euclidean distance, by at least a fixed margin (1.0). Only the small projection head's weights are updated — the pretrained backbone never changes.
+- **Loss — triplet margin loss:** the frozen backbone + trainable head embeds all three clips (anchor $a$, positive $p$, negative $n$); the loss pushes the anchor closer to the positive and further from the negative, in Euclidean distance, by at least a fixed margin $m = 1$:
+
+$$
+L = \max\bigl(0,\ \lVert a - p \rVert_2 - \lVert a - n \rVert_2 + m\bigr)
+$$
+
+  Only the small projection head's weights are updated — the pretrained backbone never changes.
 
 ### 15.2 Version 2 — adding domain-adversarial training (`dataset_v2.py` + `train_siamese_v2.py`)
 
@@ -400,7 +414,7 @@ Because the anchors this system actually uses at inference time (§5) are TTS-sy
 
 - **Data:** `SpeechTripletDomainDataset` extends v1's sampler with TTS clips (from a large pre-built bank, §15.4) and, with some probability, deliberately constructs an anchor/positive pair where one is real speech and the other is TTS speech of the same word (a "cross-domain" pair) — plus a per-clip domain label (0 = real, 1 = synthetic).
 - **Domain-adversarial mechanism — gradient reversal:** a small extra classifier (the "domain head") is trained to predict real-vs-synthetic from an embedding. But its input first passes through a **gradient reversal layer** — a layer that does nothing on the forward pass but *negates* the gradient flowing backward through it. The practical effect: the domain classifier gets better at telling real and synthetic apart, while the main embedding head is simultaneously pushed, by that same reversed gradient, to make its embeddings *harder* for that classifier to tell apart. This is a classic adversarial min-max setup implemented with a single combined loss and one optimizer step (rather than alternating updates).
-- **Combined loss:** `(1 − β) · triplet_loss + β · domain_loss`, where `β` ramps linearly from 0 up to a maximum value over the first several epochs, so early training focuses purely on the triplet objective before the domain-adversarial term is introduced.
+- **Combined loss:** $L = (1 - \beta) \cdot L_{\text{triplet}} + \beta \cdot L_{\text{domain}}$, where $\beta$ ramps linearly from 0 up to a maximum value over the first several epochs, so early training focuses purely on the triplet objective before the domain-adversarial term is introduced.
 - Training warm-starts from the v1 checkpoint's projection head weights.
 
 ### 15.3 Version 3 — a trained pooling head with classification loss (`dataset_v3.py` + `train_siamese_v3.py`)
@@ -446,6 +460,7 @@ Every environment variable below is read by `core/scoring.py` and inherited by a
 | `SIAMESE_ALLOW_UNTRAINED_HEAD` | unset | If set, `wavlm-trained` proceeds with an untrained (identity-init) head when no checkpoint file is found, instead of raising an error |
 | `SIAMESE_PROJECT_ROOT` | repo root | Redirects every path this project resolves (`keywords/`, `audios/`, `checkpoints/`, `logs/`) to a different root directory — the mechanism the live platform and the ablation study both use for isolation |
 | `SIAMESE_AUDIO_DIR` | `<root>/audios` | Which chunk-set directory the pipeline reads/scores against |
+| `SIAMESE_PHONE_VERIFY` | `1` (on) | Set to `0` to disable the live platform's phoneme-verification stage (§14.3) |
 | `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` (set by `core/scoring.py`) | Force Hugging Face libraries to use only locally cached models, never attempt a network fetch |
 
 ---
