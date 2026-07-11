@@ -58,8 +58,8 @@ slow, and downloading continues throughout):** synthesize the multi-voice
 TTS anchor → wait until ~10 chunks exist on disk → transcribe those chunks
 (whisper-base, one-time) → build the AS-norm cohort → calibrate the
 detection threshold, using the transcript to exclude any keyword-bearing
-chunk from its negative sample → load the phoneme verifier and calibrate
-its accept threshold (cached to `<kw>_phone_cache.json`). Later runs with
+chunk from its negative sample → build the keyword's rival anchors and
+calibrate the accept margin (cached to `<kw>_rivals*.npz`). Later runs with
 the same keyword (or a new keyword against the same downloaded audio) skip
 whatever's already built.
 
@@ -67,10 +67,11 @@ whatever's already built.
 Siamese AS-norm detector (50 ms hop — must match the calibration window
 grid). For each chunk:
 
-- **detection** → the phoneme verifier re-checks the detected event in the
-  phone view (see below); if it passes, chunk video+audio move to
-  `data/detections/<keyword>/` with a JSON record of times/scores/phone-sim;
-  if not, the chunk is deleted and the rejection logged with its scores;
+- **detection** → the rival-anchor verifier re-checks the detected event
+  against the keyword's synthesized impostors (see below); if it passes,
+  chunk video+audio move to `data/detections/<keyword>/` with a JSON record
+  of times/scores/rival-margin; if not, the chunk is deleted and the
+  rejection logged with its scores;
 - **no detection** → chunk files deleted immediately,
 
 so disk and memory stay flat during arbitrarily long runs (same
@@ -84,27 +85,34 @@ truth to exclude the keyword's own utterance from its negative sample (see
 "Calibration leakage guard" below) — the live detection loop itself never
 transcribes anything.
 
-### Phoneme verifier (precision stage)
+### Rival-anchor verification (precision stage)
 
 The embedding detector confuses phonetic near-neighbours of the keyword: a
 live 'party' session fired on "policy" at AS-norm 8.17 — above real
 keyword hits at 6.13 — so no threshold tweak can separate them, and every
 cheap structural signal (window support count, multi-scale consistency,
 raw cosine) fails with them because they are all functions of the same
-embedding. Each detection is therefore re-checked in a decorrelated view
-(`core/phoneme_verify.py`): the detected event's surroundings (~2.5 s) are
-CTC-decoded to IPA phones (`wav2vec2-lv-60-espeak-cv-ft`) and matched
-against phone references decoded from the keyword's own TTS anchor
-variants (bad TTS renders are dropped by a leave-one-out agreement
-filter). The chunk survives only if the keyword's phones are actually
-present (infix match, so derivatives like "parties" pass). The accept
-threshold is calibrated per keyword against keyword-free stream audio and
-cached. Verification runs only when something fired — per-chunk cost is
-zero otherwise. Set `SIAMESE_PHONE_VERIFY=0` to disable.
+*absolute* score. Each detection is therefore re-checked in a *relative*
+contest (`core/rival_verify.py`): at setup the platform synthesizes the
+keyword's own confusable words as explicit rival anchors (phone-lexicon
+neighbours plus the words the embedding itself ranks closest, from the
+global rival bank), arms only the rivals it can provably separate
+(homophones, single-schwa-edit near-homophones, and phone-substrings of
+the keyword are excluded by construction; the rest must pass per-rival
+calibration gates), and keeps a detection only if some full-word-scale
+window around it beats every armed rival by the calibrated AS-norm margin.
+Verification runs only when something fired and costs a few dot products —
+no additional model is loaded. Set `SIAMESE_VERIFIER=phone` to run the
+retired phone-CTC stage instead (ablation), or `off` to disable.
 
-On the validating 'party' session this kept 9/9 real keyword chunks
-(phone-sim 1.00) and rejected all 3 confusables ("policy platform",
-"publicly", "public", phone-sim 0.25) at auto-calibrated tau 0.75.
+On a synthetic replay of the 'party' confusable set (unseen augmented TTS
+voices), this kept 3/3 'party' probes and rejected all 9
+policy/publicly/public probes — with the nearest-rival diagnostic naming
+"policy" as the culprit; on real broadcast audio it keeps all three
+'ireland' occurrences — including the one the phone stage's tau squeeze
+clipped — while still rejecting a forced "immigration" probe against
+*administration* at margin −1.6. (Historical: the phone-CTC stage validated the same session live at
+12/12, phone-sim 1.00 vs 0.25.)
 
 ### Calibration leakage guard
 

@@ -163,16 +163,25 @@ $$
   word-family aware). The live platform (no pre-existing transcript)
   produces one itself — see
   [`platform/README.md`](platform/README.md#calibration-leakage-guard).
-- **Phoneme verification:** `pipeline/verify_detections.py` /
-  `core/phoneme_verify.py` — detections are re-checked in a decorrelated
-  view before being accepted: a ~2.5 s span around the detected event is
-  CTC-decoded to IPA phones (`wav2vec2-lv-60-espeak-cv-ft`) and matched
-  (infix edit distance) against references decoded from the keyword's own
-  TTS variants. This is what separates phonetic confusables the embedding
-  cannot ("policy"/"public" firing for *party* at scores above real hits);
-  refs + per-keyword accept threshold are cached in
-  `keywords/<kw>_phone_cache.json`. `SIAMESE_PHONE_VERIFY=0` disables it on
-  the platform.
+- **Rival-anchor verification (RAV):** `pipeline/verify_detections.py` /
+  `core/rival_verify.py` — detections are re-checked against the keyword's
+  own *synthesized impostors* before being accepted. At enrollment the
+  system derives the keyword's confusable words two ways (phone-lexicon
+  edit distance + embedding-proximity ranking over a global TTS word bank,
+  `pipeline/rival_bank.py`), synthesizes each rival through the same TTS
+  machinery as the anchor (`pipeline/rival_builder.py`), and arms only the
+  rivals it can provably separate (homophones, single-schwa-edit
+  near-homophones like ireland/island, and phone-substrings of the keyword
+  like part/party are excluded by construction; the rest must pass
+  per-rival calibration gates). A detection survives only if some
+  full-word-scale window around it beats every armed rival by the
+  calibrated AS-norm margin. This separates the phonetic confusables the
+  absolute threshold cannot ("policy"/"public" firing for *party* at
+  scores above real hits) with zero extra models — a handful of dot
+  products per detection. Artifacts: `keywords/<kw>_rivals*.npz`,
+  `keywords/<kw>_rivals/`. The retired phone-CTC stage
+  (`core/phoneme_verify.py`) remains available for ablation via
+  `SIAMESE_VERIFIER=phone`.
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
@@ -265,8 +274,12 @@ Siamese_VMS_Project/
 | 4 | `cohort_builder.py` | `cohort_<kw>*.npz` |
 | 5 | `calibrate.py` | `*_calibration*.json` |
 | 6 | `detector.py` | `logs/detections_<kw>.json` |
-| 7 | `verify_detections.py` | phone-verified detections JSON (+ `_phone_cache.json`) |
+| 7 | `verify_detections.py` | rival-verified detections JSON (+ `<kw>_rivals*.npz`) |
 | 8 | `validate_detection.py` | P / R / F1 vs transcripts |
+
+One-time (per embedding backend): `rival_bank.py` builds the global TTS word
+bank that rival selection ranks (`keywords/rival_bank*.npz`); step 7 falls
+back to lexicon-only rival selection until it exists.
 
 ## Model Training (Offline, AWS)
 
@@ -317,8 +330,10 @@ $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```bash
    python pipeline/detector.py --keyword cloudy
    ```
-7. **Phone-verify detections** (drops phonetic confusables; rewrites the
-   detections JSON, original backed up as `*_unverified.json`):
+7. **Rival-verify detections** (drops phonetic confusables via the keyword's
+   synthesized rival anchors; rewrites the detections JSON, original backed
+   up as `*_unverified.json`; builds `<kw>_rivals*.npz` on first run —
+   `--stage phone` runs the retired phone-CTC stage instead, for ablation):
    ```bash
    python pipeline/verify_detections.py --keyword cloudy
    ```

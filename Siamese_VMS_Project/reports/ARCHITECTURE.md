@@ -42,7 +42,8 @@ Siamese_VMS_Project/
 │   ├── siamese_model.py   the legacy ("baseline") embedding model
 │   ├── embedders.py       the WavLM-based embedding backends (current default)
 │   ├── scoring.py         AS-norm scoring math, paths, config, env vars
-│   ├── phoneme_verify.py  phone-sequence verification of detections
+│   ├── rival_verify.py    rival-anchor verification of detections (default)
+│   ├── phoneme_verify.py  retired phone-CTC verification (kept for ablation)
 │   └── augment_utils.py   audio distortion effects (pitch/tempo/reverb/noise)
 │
 ├── pipeline/          the offline, step-by-step research pipeline (run as scripts)
@@ -52,7 +53,9 @@ Siamese_VMS_Project/
 │   ├── cohort_builder.py      → impostor cohort embeddings
 │   ├── calibrate.py           → decision threshold
 │   ├── detector.py            → scans chunks, writes detections
-│   ├── verify_detections.py   → phone-verifies detections (precision)
+│   ├── rival_bank.py          → global TTS word bank (one-time per backend)
+│   ├── rival_builder.py       → per-keyword rival anchors + accept margin
+│   ├── verify_detections.py   → rival-verifies detections (precision)
 │   └── validate_detection.py  compares detections against transcripts
 │
 ├── platform/          the live-monitoring desktop app (wraps the pipeline above)
@@ -97,11 +100,11 @@ flowchart TD
         CB --> CAL --> DET
     end
 
-    DET --> VER["verify_detections.py\n(phoneme verification:\nconfirms the keyword's phones\nare actually in the audio)"]
-    VER --> OUT["logs/detections_&lt;keyword&gt;.json\n(phone-verified)"]
+    DET --> VER["verify_detections.py\n(rival-anchor verification:\nthe detection must beat the\nkeyword's synthesized rivals)"]
+    VER --> OUT["logs/detections_&lt;keyword&gt;.json\n(rival-verified)"]
 ```
 
-Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The phoneme-verification step at the end re-checks each detection through an independent view — the phone sequence — because the embedding alone can confuse similar-sounding words (§14.3 describes the mechanism; the same module gates the live platform's detections). The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
+Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The verification step at the end re-checks each detection through a *relative* contest — it must out-score the keyword's own synthesized confusable words ("rival anchors") — because an absolute score alone can confuse similar-sounding words (§14.3 describes the mechanism; the same module gates the live platform's detections; the retired phone-CTC alternative remains selectable for ablation). The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
 
 ---
 
@@ -355,15 +358,23 @@ stateDiagram-v2
    - transcribes just that bootstrap window **once** (calling `transcribe_chunks()` in-process rather than as a subprocess, to avoid re-paying the heavy library import cost), producing a `transcripts.txt` — this is what lets the calibration leakage guard (§9/§12) function on a live stream that has no pre-existing transcript;
    - runs `cohort_builder.py` and `calibrate.py` as subprocesses (each skipped if their output already exists);
    - loads the model, anchor, cohort, and threshold **in-process** (not as a subprocess) for use in the next phase;
-   - loads the phoneme verifier and calibrates its per-keyword accept threshold (cached to `<keyword>_phone_cache.json`; skipped when the cache exists — see below).
+   - builds the keyword's rival anchors (`rival_builder.py` as a subprocess; skipped when `<keyword>_rivals*.npz` already exists) and loads them — see below.
 3. **`live`** — an endless loop. The downloader thread's backlog policy switches from "pause accepting new segments once the queue is full" to "drop the oldest unprocessed chunk once the queue is full," keeping the monitor close to real time. For every chunk that arrives:
    - it's scanned using `scan_chunk()`, an in-process port of the same multi-scale, AS-norm-based scanning logic as `detector.py` (§10), using the same 50ms hop;
-   - **if any window clears the threshold:** the detection is re-checked by the phoneme verifier (below); if it passes, the chunk's audio and video files are **moved** into `platform/data/detections/<keyword>/`, alongside a JSON record of the detection times/scores/phone-similarity, and the running detection count is announced (`@@DETECT <n>`); if it fails, the chunk is deleted and the rejection logged with both scores;
+   - **if any window clears the threshold:** the detection is re-checked by the rival-anchor verifier (below); if it passes, the chunk's audio and video files are **moved** into `platform/data/detections/<keyword>/`, alongside a JSON record of the detection times/scores/rival-margin, and the running detection count is announced (`@@DETECT <n>`); if it fails, the chunk is deleted and the rejection logged with both scores;
    - **if nothing clears the threshold:** the chunk's audio and video files are simply **deleted** from disk.
    
    This keep-or-delete policy means disk usage stays flat no matter how long a session runs. One additional detail: every downloaded chunk is *also* copied (before this keep/delete decision is made) into a separate `platform/data/audios_copy/` folder, which is never cleaned up — a standing, manually browsable archive of every chunk that was ever downloaded, independent of what the detector decided to do with the original.
 
-**The phoneme verifier** (`core/phoneme_verify.py`) is the second, independent check a detection must pass before being saved. Why it exists: the embedding sometimes scores a *phonetically similar* word (e.g. "policy" when hunting "party") as high as the keyword itself, and every embedding-derived signal fails together on such confusables — so the confirmation has to come from a genuinely different information source. The verifier CTC-decodes a ~2.5-second span of audio around the detected event into a sequence of IPA phones (using a separate pretrained phoneme-recognition model, `wav2vec2-lv-60-espeak-cv-ft`) and compares that sequence against reference phone sequences decoded from the keyword's own TTS anchor clips (a leave-one-out agreement filter first discards any badly-rendered TTS reference). The comparison is an "infix" edit-distance match — the reference only has to appear as a substring of the decoded span, so neighbouring words cost nothing and suffixed forms ("parties") still match. A chunk is kept only if this phone similarity reaches the per-keyword calibrated threshold; otherwise it is deleted like a no-match. The stage runs only when a detection fires (no cost on ordinary chunks) and can be disabled with `SIAMESE_PHONE_VERIFY=0`. The platform never invokes `validate_detection.py` (that script remains an offline-only tool).
+**The rival-anchor verifier** (`core/rival_verify.py`) is the second check a detection must pass before being saved. Why it exists: the embedding sometimes scores a *phonetically similar* word (e.g. "policy" when hunting "party") as high as the keyword itself, and every signal derived from the absolute score fails together on such confusables — so the confirmation has to come from a *relative* test instead. At setup, the system synthesizes the keyword's own likely impostors ("rivals") and a detection is kept only if it beats every one of them by a calibrated margin.
+
+The mechanics, step by step:
+1. **Rival selection** (two stages, both from the keyword's *text* alone): the nearest words in phone space (CMUdict/g2p edit distance — catches form-close words of any frequency, like "iceland" for `ireland`), plus the frequent words whose *embeddings* sit closest to the anchor, ranked over a global pre-embedded word bank (`pipeline/rival_bank.py`, ~4000 frequent words × one TTS voice, built once per backend) — this catches the detector's own confusables that phone distance misses entirely ("policy" is the 845th phone-neighbour of `party` but its 6th embedding-neighbour).
+2. **Exclusions, by construction:** the keyword's stem family ("parties" must keep matching); perfect homophones and *effective* homophones (a single edit among reduced/schwa-class vowels — broadcast "ireland" genuinely is "island"); and phone-substrings of the keyword (≥70% contiguous phone overlap, schwa-normalized) — because the detector's smaller window scales legitimately cover *partial* words, and a rival like "ministration" would match genuine "administration" windows.
+3. **Arming gates:** each surviving rival is synthesized in the 7 canonical TTS voices and embedded; it is armed only if its own clips *lose* the margin contest decisively and the keyword's held-out positive voices *win* it clearly. Rivals the embedding cannot separate are dropped and logged — the stage self-reports its per-keyword rejection scope.
+4. **Verification:** margins are computed in AS-norm space (the same normalization the detector uses, which removes per-anchor bias), over a small grid of *full-word-scale* windows (0.8/1.0× the anchor window, ±0.25 s) around the detected event, pooled from the chunk's frame sequence exactly like every other window in the system. The event's margin is the best over that grid — a true keyword wins at some full-word alignment; a confusable wins at none. Detection windows themselves are *not* used for verification: they are often sub-word, and a 0.6-scale window on a genuine "administration" is acoustically "-istration".
+
+The stage runs only when a detection fires, adds no model (a few dot products against a dozen centroids), and its artifacts (`<keyword>_rivals*.npz`, rival clips) are cached per keyword. `SIAMESE_VERIFIER` selects the stage: `rival` (default), `phone` (the retired phone-CTC design, `core/phoneme_verify.py`, kept for ablation), or `off`. The platform never invokes `validate_detection.py` (that script remains an offline-only tool).
 
 ### 14.4 The GUI itself
 
@@ -460,7 +471,9 @@ Every environment variable below is read by `core/scoring.py` and inherited by a
 | `SIAMESE_ALLOW_UNTRAINED_HEAD` | unset | If set, `wavlm-trained` proceeds with an untrained (identity-init) head when no checkpoint file is found, instead of raising an error |
 | `SIAMESE_PROJECT_ROOT` | repo root | Redirects every path this project resolves (`keywords/`, `audios/`, `checkpoints/`, `logs/`) to a different root directory — the mechanism the live platform and the ablation study both use for isolation |
 | `SIAMESE_AUDIO_DIR` | `<root>/audios` | Which chunk-set directory the pipeline reads/scores against |
-| `SIAMESE_PHONE_VERIFY` | `1` (on) | Set to `0` to disable the live platform's phoneme-verification stage (§14.3) |
+| `SIAMESE_VERIFIER` | `rival` | Verification stage (§14.3): `rival` (rival-anchor, default), `phone` (retired phone-CTC, for ablation), or `off` |
+| `SIAMESE_RIVAL_BANK` | `<code repo>/keywords/rival_bank<suffix>.npz` | Path override for the global rival word bank (a model-level artifact, resolved against the code repo rather than `SIAMESE_PROJECT_ROOT`) |
+| `SIAMESE_PHONE_VERIFY` | `1` | Legacy switch: `0` maps to `SIAMESE_VERIFIER=off` when `SIAMESE_VERIFIER` is unset |
 | `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` (set by `core/scoring.py`) | Force Hugging Face libraries to use only locally cached models, never attempt a network fetch |
 
 ---
@@ -473,13 +486,15 @@ Run from `Siamese_VMS_Project/`, after picking a backend (defaults shown target 
 $env:SIAMESE_BACKEND = "wavlm-trained"
 $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
 
+python pipeline/rival_bank.py              # one-time per backend: global rival word bank
 python pipeline/downloader.py              # stream -> audios/*.wav, videos/*.mp4
 python pipeline/transcribe_chunks.py       # audios/*.wav -> audios/transcripts.txt
 python pipeline/keyword_generator.py --keyword <word>   # -> keywords/<word>_anchor*.npz
 python pipeline/cohort_builder.py --keyword <word>       # -> keywords/cohort_<word>*.npz
 python pipeline/calibrate.py --keyword <word>            # -> keywords/<word>_calibration*.json
 python pipeline/detector.py --keyword <word>             # -> logs/detections_<word>.json
-python pipeline/verify_detections.py --keyword <word>    # phone-verifies detections (rewrites the JSON)
+python pipeline/verify_detections.py --keyword <word>    # rival-verifies detections (rewrites the JSON;
+                                                         #   --stage phone = retired CTC stage, ablation)
 python pipeline/validate_detection.py --keyword <word>   # compares detections vs. transcript
 ```
 
@@ -494,6 +509,7 @@ For the live platform instead of the step-by-step pipeline above, simply run `py
 - **L2-normalize** — rescale a vector to have length exactly 1, without changing its direction.
 - **Frozen backbone** — a large pretrained neural network whose weights are never updated during this project's training; only a small extra "head" on top is trained.
 - **Anchor / centroid / prototype** — the single reference embedding representing a keyword, built by averaging embeddings of many synthesized voices.
+- **Rival anchor** — the same construction applied to one of the keyword's confusable words, synthesized at enrollment time; a detection must out-score every armed rival by a calibrated margin to be kept (§14.3).
 - **Cohort** — a batch of "not the keyword" reference audio embeddings, used to judge whether a raw similarity score is meaningfully high.
 - **Calibration** — the process of choosing a numeric decision threshold from cohort/negative scores.
 - **AS-norm (Adaptive Score Normalization)** — a formula that converts a raw similarity score into a normalized score expressed relative to how impostor audio scores against the same anchor/window.

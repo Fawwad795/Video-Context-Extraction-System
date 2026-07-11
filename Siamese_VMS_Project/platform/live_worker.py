@@ -32,7 +32,10 @@ Architecture: downloading and detection are decoupled.
       Then the endless live loop: take the next chunk off the queue, scan it
       with the AS-norm detector (50 ms hop - must match the calibration
       window grid), then:
-        detection          -> chunk audio+video moved to
+        detection          -> re-checked by the verification stage (default:
+                              rival-anchor margins, core/rival_verify.py;
+                              SIAMESE_VERIFIER selects rival/phone/off); if
+                              it passes, chunk audio+video moved to
                               detections/<keyword>/ with a JSON record
         no detection       -> chunk audio+video deleted
 

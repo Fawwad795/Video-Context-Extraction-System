@@ -409,6 +409,65 @@ tau are cached per keyword (`keywords/<kw>_phone_cache.json`); at
 detection time one CTC decode per event, only on chunks that fired.
 `SIAMESE_PHONE_VERIFY=0` disables the platform stage.
 
+## Rival-anchor verification replaces the phone stage (2026-07-11, branch `feature/rival-anchor-verifier`)
+
+Motivation: keep the two-stage cascade's precision role but make the second
+view an in-house mechanism (decision-time synthesized impostors) rather than
+phone-sequence matching, and fix the phone stage's measured weakness (the
+consistency sweep's only cascade miss: ireland live_6 clipped at phone-sim
+0.80 vs tau 0.81, tau squeezed by "Island" in the keyword-free audio).
+
+**Design** (`core/rival_verify.py`, `pipeline/rival_builder.py`,
+`pipeline/rival_bank.py`; phone stage kept behind `SIAMESE_VERIFIER=phone`):
+synthesize the keyword's confusables as explicit rival anchors and keep a
+detection only if a full-word-scale window around it beats every armed rival
+by a calibrated AS-norm margin. Every design element was forced by a measured
+failure during bring-up, in order:
+
+1. *Embedding-space rival selection* — phone edit distance never surfaces the
+   live-observed confusables ("policy" is party's 845th phone neighbour,
+   "public" its 31,727th); ranking a global TTS word bank (4k frequent words
+   from the Whisper BPE vocabulary, one voice each) by anchor proximity finds
+   policy at #6. Two-stage union: lexicon neighbours + bank neighbours.
+2. *Effective-homophone exclusion* — arming "island" against ireland rejected
+   all 3 real ireland chunks (margins −0.28..−0.57): broadcast /aɪɚlənd/ with
+   reduced /ɚ/ IS /aɪlənd/. Single-edit pairs whose edit is schwa-family are
+   excluded as out of acoustic scope (matches the phone stage's 0.80-vs-0.81
+   squeeze on the same pair).
+3. *Phone-substring exclusion* (schwa-normalized ≥0.7 contiguous overlap) —
+   "ministration" rejected genuine "administration" windows: 0.6-scale
+   detection windows legitimately cover partial words, so any rival that is a
+   partial rendering of the keyword rejects the keyword itself. Same rule
+   catches part/partly for party.
+4. *Per-rival arming gates* — rival's own clips must lose by ≥0.15 AS-norm
+   margin AND the keyword's holdout positives must beat it by ≥0.30 (p10);
+   dropped pardee/pardi/pardy (D↔T voicing neighbours of party) and generic
+   "-ation" words whose tight clean centroids out-compete the diffuse
+   augmented anchor.
+5. *AS-norm margins* (not raw cosine — anchor-construction bias) and
+   *full-word alignment-search verification* (0.8/1.0× anchor window,
+   ±0.25 s grid around the trigger, margin = max over grid) — verifying on
+   the sub-word detection windows themselves replays failure 3 from the
+   audio side: the top windows of a true "administration" are acoustically
+   "-istration" and lose to "information".
+
+**Validation so far** (real audio unless noted):
+- ireland on D: 3/3 verified at margins +1.98..+2.15 (nearest armed rival
+  "iceland") — including live_6, the phone stage's only cascade miss.
+- administration on E: TP verified +0.45; forced-event probe on the real
+  "immigration" chunk rejected at −1.58.
+- party/policy regression (synthetic proxy; the live session's audio is
+  gone): party in 3 unseen blended+augmented TTS voices → 3/3 KEEP
+  (+0.006..+2.25); policy/publicly/public ×3 each → 9/9 REJECT
+  (−0.29..−1.75), with the nearest-rival diagnostic naming "policy" itself.
+- Full 14-eval rival-vs-phone head-to-head on identical fresh detector
+  outputs: running (`Journal_Paper/experiments/run_rival_vs_phone.sh`).
+
+Cost: no second model (the phone stage loaded ~1.2 GB wav2vec2-large);
+verification is a few dot products against ~a dozen rival centroids.
+One-time artifacts: global bank ~2 h CPU per backend; per-keyword rivals
+~1–2 min (TTS) cached in `keywords/<kw>_rivals*.npz`.
+
 ## Key findings
 
 1. **TTS↔real domain gap was the recall killer.** On conversational speech the
@@ -466,6 +525,19 @@ detection time one CTC decode per event, only on chunks that fired.
    decodes that disagree with the voice consensus (one accented voice
    rendered 'party' as /ph ɑ l i/ - a reference that would have matched
    the very confusable the verifier exists to reject).
+
+9. **The absolute-vs-relative distinction, not the second model, is what
+   separates confusables.** Finding 8 concluded the confirmation must come
+   from a different information source; the rival-anchor stage shows a
+   *relative* test in the SAME embedding space suffices: real confusable
+   audio loses the margin contest to its own rival anchor (policy probes
+   −1.1..−1.5) while true keyword audio wins at some full-word alignment.
+   What actually failed in the live 'party' incident was every signal
+   derived from one absolute score against one anchor. The embedding's
+   resolution floor still exists — homophones and single-schwa-edit pairs
+   are excluded as unseparable by construction — and the phone view keeps
+   independent value there only in principle, since the same pair also sat
+   at its resolution floor (0.80 vs tau 0.81).
 
 ## Artifact map (post-cleanup, 2026-07-02)
 
