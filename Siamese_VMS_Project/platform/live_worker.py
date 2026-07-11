@@ -545,15 +545,41 @@ def main():
     status(f"Anchor: {anchor_desc} | window {window_seconds:.2f}s | "
            f"threshold {threshold:.3f} ({threshold_desc})")
 
-    # -- 4.5 Phoneme verifier (precision stage) ------------------------------
+    # -- 4.5 Verification stage (precision) ----------------------------------
     # The embedding confuses phonetic near-neighbours ('party' fired on
-    # "policy" at AS-norm 8.17 - above real hits); no threshold separates
-    # them, so verified detections are re-checked in the decorrelated phone
-    # view (core/phoneme_verify.py). Refs + tau are cached per keyword;
-    # per-chunk cost is zero unless a detection fires.
-    # SIAMESE_PHONE_VERIFY=0 disables.
+    # "policy" at AS-norm 8.17 - above real hits); no absolute threshold
+    # separates them, so detections are re-checked by a second view before a
+    # chunk is kept. SIAMESE_VERIFIER selects the stage:
+    #   rival (default) - rival-anchor verification (core/rival_verify.py):
+    #       synthesized phonetic near-neighbour anchors; a detection must
+    #       beat every rival by the calibrated margin delta. No extra model.
+    #   phone - retired phone-CTC stage (core/phoneme_verify.py), for
+    #       ablation. off - disable. (Legacy SIAMESE_PHONE_VERIFY=0 -> off.)
+    stage = os.environ.get("SIAMESE_VERIFIER", "").strip().lower()
+    if not stage:
+        stage = ("off" if os.environ.get("SIAMESE_PHONE_VERIFY", "1") == "0"
+                 else "rival")
+    rival = None
+    if stage == "rival":
+        import rival_verify as rv
+        npz_path = rv.rivals_path(keyword, data_root)
+        if not os.path.exists(npz_path):
+            status("Building rival anchors (one-time, ~1 min) ...")
+            r = subprocess.run(
+                [sys.executable,
+                 os.path.join(PIPELINE_DIR, "rival_builder.py"),
+                 "--keyword", keyword])
+            if r.returncode != 0:
+                status("rival_builder failed - verification disabled "
+                       "for this session")
+        loaded = rv.load_rivals(npz_path)
+        if loaded is not None:
+            r_words, r_centroids, r_delta = loaded
+            rival = (rv, r_words, r_centroids, r_delta)
+            status(f"Rival verifier ready ({len(r_words)} rivals, "
+                   f"delta {r_delta:+.3f}): {', '.join(r_words[:5])}...")
     phone = None
-    if os.environ.get("SIAMESE_PHONE_VERIFY", "1") != "0":
+    if stage == "phone":
         import numpy as _np
         import phoneme_verify as pv
         from scoring import keyword_free_chunks
@@ -606,29 +632,42 @@ def main():
                           threshold, SAMPLE_RATE, DEFAULT_TOP_K)
         detections = scan["detections"] if scan is not None else []
 
-        # Precision stage: confirm the keyword's phones are actually in the
-        # audio before keeping the chunk. Runs only when something fired.
+        # Precision stage: a detection must survive the second view before
+        # the chunk is kept. Runs only when something fired.
         phone_sim = None
-        if detections and phone is not None:
+        rival_margin = None
+        nearest_rival = None
+        reject_note = None
+        if detections and rival is not None:
+            rv, r_words, r_centroids, r_delta = rival
+            ok, rival_margin, nearest_rival = rv.verify_chunk(
+                y, detections, window_samples, model, anchor,
+                r_words, r_centroids, r_delta, cohort=cohort)
+            if not ok:
+                reject_note = (f"margin {rival_margin:+.3f} < delta "
+                               f"{r_delta:+.3f} (nearest rival "
+                               f"'{nearest_rival}')")
+        elif detections and phone is not None:
             refs, tau, pv_processor, pv_model, pv_torch, pv = phone
             ok, phone_sim = pv.verify_chunk(
                 y, detections, window_seconds, refs, tau,
                 pv_processor, pv_model, pv_torch)
             if not ok:
-                top = detections[0]
-                status(f"{name}: rejected confusable at {top['time']:.1f}s "
-                       f"(AS-norm {top['score']:.2f} but phone-sim "
-                       f"{phone_sim:.2f} < tau {tau:.2f}) - chunk deleted")
-                with open(live_log, "a", encoding="utf-8") as f:
-                    f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] REJECTED "
-                            f"'{keyword}' in {name}: AS-norm "
-                            f"{top['score']:.2f}, phone-sim {phone_sim:.2f} "
-                            f"< tau {tau:.2f}\n")
-                del y
-                for p in (audio_path, video_path):
-                    if os.path.exists(p):
-                        os.remove(p)
-                return
+                reject_note = f"phone-sim {phone_sim:.2f} < tau {tau:.2f}"
+        if reject_note is not None:
+            top = detections[0]
+            status(f"{name}: rejected confusable at {top['time']:.1f}s "
+                   f"(AS-norm {top['score']:.2f} but {reject_note}) "
+                   f"- chunk deleted")
+            with open(live_log, "a", encoding="utf-8") as f:
+                f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] REJECTED "
+                        f"'{keyword}' in {name}: AS-norm "
+                        f"{top['score']:.2f}, {reject_note}\n")
+            del y
+            for p in (audio_path, video_path):
+                if os.path.exists(p):
+                    os.remove(p)
+            return
         del y
 
         if detections:
@@ -646,10 +685,16 @@ def main():
                            "threshold": threshold,
                            "best_score": scan["best_score"],
                            "phone_sim": phone_sim,
+                           "rival_margin": rival_margin,
+                           "nearest_rival": nearest_rival,
                            "detections": detections}, f, indent=2)
             top = detections[0]
-            phone_note = (f", phone-sim {phone_sim:.2f}"
-                          if phone_sim is not None else "")
+            if rival_margin is not None:
+                phone_note = f", rival margin {rival_margin:+.2f}"
+            elif phone_sim is not None:
+                phone_note = f", phone-sim {phone_sim:.2f}"
+            else:
+                phone_note = ""
             msg = (f"MATCH '{keyword}' in {name} at {top['time']:.1f}s "
                    f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}"
                    f"{phone_note}) -> saved {base}.mp4")
