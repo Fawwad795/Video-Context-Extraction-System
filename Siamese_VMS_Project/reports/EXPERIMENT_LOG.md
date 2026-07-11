@@ -461,7 +461,19 @@ failure during bring-up, in order:
   (+0.006..+2.25); policy/publicly/public ×3 each → 9/9 REJECT
   (−0.29..−1.75), with the nearest-rival diagnostic naming "policy" itself.
 - Full 14-eval rival-vs-phone head-to-head on identical fresh detector
-  outputs: running (`Journal_Paper/experiments/run_rival_vs_phone.sh`).
+  outputs (2026-07-12, final constants: delta = rival max + 0.2 x gap,
+  overlap bar 0.65): **RAV cascade 27/28 TP, 0 FP, micro F1 0.982 = phone
+  cascade 27/28, 0.982 — complementary single failures.** RAV's miss is
+  the boundary-truncated outbreaks live_2 (no full-word verification
+  window exists at a chunk edge; ingestion overlap is the fix); phone's
+  miss is ireland live_6 (tau squeezed by "Island"). Detector-only stays
+  28/28 (1.000). Two calibration-constant bugs were found and fixed by
+  the sweep itself: a midpoint delta rule clipped real america hits that
+  WON their contest (margins +2.1/+3.0 vs delta 3.17 — rule changed to
+  rival-max + 0.2 x gap, house style), and "westward" (0.667 overlap,
+  shared stressed onset + reduced tail) false-rejected western until the
+  substring bar moved 0.7 -> 0.65. RAV is the default stage; phone kept
+  as the ablation (`SIAMESE_VERIFIER=phone`).
 
 Cost: no second model (the phone stage loaded ~1.2 GB wav2vec2-large);
 verification is a few dot products against ~a dozen rival centroids.

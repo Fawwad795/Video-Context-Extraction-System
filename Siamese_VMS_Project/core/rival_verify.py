@@ -51,6 +51,7 @@ TOP_WINDOWS_PER_EVENT = 5    # windows whose margin median decides an event
 MIN_RIVAL_GAP = 0.15         # a rival's own clips must lose by at least this
 MIN_POS_GAP = 0.30           # keyword positives must beat each rival by this
 DELTA_FLOOR = 0.0            # never accept a detection that loses the argmax
+DELTA_GAP_FRACTION = 0.2     # margin bar: rival max + this fraction of the gap
 
 
 def bank_path():
@@ -129,8 +130,10 @@ def _effective_homophone(kw_ph, ph):
     return False
 
 
-MAX_PHONE_OVERLAP = 0.7      # contiguous-overlap ratio above which a rival
+MAX_PHONE_OVERLAP = 0.65     # contiguous-overlap ratio above which a rival
                              # is a partial rendering of the keyword itself
+                             # or shares its whole stressed onset with only a
+                             # reduced tail differing (westward/western)
 
 
 def _norm_reduced(seq):
@@ -290,7 +293,15 @@ def calibrate_delta(pos_embs, rival_clip_embs, anchor, rival_centroids,
     riv_m = margins(rival_clip_embs, anchor, rival_centroids, cohort)
     pos_lo = float(np.percentile(pos_m, 10))
     riv_hi = float(riv_m.max())
-    delta = max(DELTA_FLOOR, (pos_lo + riv_hi) / 2.0)
+    # Same rule shape as the detector threshold (Eq. base + k*gap): anchor
+    # the margin just above what impostor audio achieves, stepping a fixed
+    # fraction of the gap toward the positives. A midpoint rule lands too
+    # high when rivals are weak - real keyword audio's margins sit
+    # systematically below the TTS positives' (domain gap), and an easy
+    # rival set must not inflate the bar ("america" positives at +6 pushed a
+    # midpoint delta to +3.2, clipping real hits that WON their contest).
+    delta = max(DELTA_FLOOR,
+                riv_hi + DELTA_GAP_FRACTION * max(0.0, pos_lo - riv_hi))
     if riv_hi >= pos_lo:
         log(f"  WARNING: rival margins overlap positives "
             f"(riv max {riv_hi:+.3f} vs pos p10 {pos_lo:+.3f}) - "
