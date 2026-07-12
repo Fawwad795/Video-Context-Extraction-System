@@ -102,8 +102,8 @@ the keyword are excluded by construction; the rest must pass per-rival
 calibration gates), and keeps a detection only if some full-word-scale
 window around it beats every armed rival by the calibrated AS-norm margin.
 Verification runs only when something fired and costs a few dot products —
-no additional model is loaded. Set `SIAMESE_VERIFIER=phone` to run the
-retired phone-CTC stage instead (ablation), or `off` to disable.
+no additional model is loaded. Set `SIAMESE_VERIFIER=off` to disable; the retired phone-CTC stage is
+preserved on the `archive/phone-verifier` branch.
 
 On a synthetic replay of the 'party' confusable set (unseen augmented TTS
 voices), this kept 3/3 'party' probes and rejected all 9

@@ -1,24 +1,19 @@
 """Verification of detector output (offline pipeline, precision stage).
 
-Re-checks every chunk in logs/detections_<keyword>.json through a second
-view before the numbers are trusted. Two stages are available, selected by
-SIAMESE_VERIFIER (or --stage):
-
-  rival  (default) - rival-anchor verification (core/rival_verify.py): the
-          keyword's synthesized phonetic near-neighbours act as explicit
-          impostor anchors; a detection survives only if its window
-          embeddings beat every rival by the calibrated margin delta.
-          Requires keywords/<kw>_rivals<suffix>.npz (built automatically via
-          pipeline/rival_builder.py when missing).
-  phone  - the retired phone-sequence stage (core/phoneme_verify.py), kept
-          for ablation: wide-span CTC decode matched against LOO-filtered
-          TTS reference phone strings, threshold tau cached per keyword.
+Re-checks every chunk in logs/detections_<keyword>.json through rival-anchor
+verification (core/rival_verify.py) before the numbers are trusted: the
+keyword's synthesized phonetic near-neighbours act as explicit impostor
+anchors, and a detection survives only if its window embeddings beat every
+rival by the calibrated margin delta. Requires
+keywords/<kw>_rivals<suffix>.npz (built automatically via
+pipeline/rival_builder.py when missing). The retired phone-CTC stage is
+preserved on the archive/phone-verifier branch.
 
 Chunks that fail are rewritten with empty detections; the original file is
 backed up as *_unverified.json. Run validate_detection.py afterwards for
 verified P/R/F1.
 
-Usage: python pipeline/verify_detections.py --keyword party [--stage rival]
+Usage: python pipeline/verify_detections.py --keyword party
 """
 
 import argparse
@@ -36,7 +31,7 @@ import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _os.pardir, "core"))
 
 import console as ui
-from scoring import PROJECT_ROOT, SAMPLE_RATE, keyword_free_chunks
+from scoring import PROJECT_ROOT, SAMPLE_RATE
 
 if hasattr(_sys.stdout, "reconfigure"):
     _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -136,92 +131,11 @@ def verify_rival(keyword, args):
     _write_results(json_path, results, kept, dropped, t0)
 
 
-# --------------------------------------------------------------------------
-# Stage: phone-sequence verification (retired; kept for ablation)
-# --------------------------------------------------------------------------
-
-def verify_phone(keyword, args):
-    import phoneme_verify as pv
-
-    t0 = time.perf_counter()
-    ui.banner("PHONEME VERIFICATION", f"keyword: {keyword}")
-    json_path, results = _load_results(keyword)
-    if results is None:
-        return
-    window_seconds = float(results["window_seconds"])
-
-    ui.step(f"loading phoneme recognizer {pv.PHONEME_MODEL} ...")
-    processor, model, torch = pv.load_phoneme_model()
-
-    cache_path = os.path.join(PROJECT_ROOT, "keywords",
-                              f"{keyword}_phone_cache.json")
-    cached = pv.load_phone_cache(cache_path)
-    if cached and args.tau is None:
-        refs, tau = cached
-        ui.ok(f"refs + tau loaded from cache ({len(refs)} refs, tau={tau:.3f})")
-    else:
-        ui.step("building phoneme references from anchor variants ...")
-        variants_dir = os.path.join(PROJECT_ROOT, "keywords", f"{keyword}_variants")
-        refs, loo_mean = pv.build_references(
-            keyword, variants_dir, processor, model, torch,
-            max_refs=args.max_refs, log=ui.item)
-        if not refs:
-            ui.fail("No usable reference decodes - aborting.")
-            return
-        ui.kv("reference self-similarity", f"{loo_mean:.3f}")
-        if args.tau is not None:
-            tau = args.tau
-        else:
-            ui.step("calibrating tau on keyword-free stream windows ...")
-            rng = np.random.default_rng(args.seed)
-            tau = pv.calibrate_tau(refs, loo_mean, window_seconds,
-                                   keyword_free_chunks(keyword), processor,
-                                   model, torch, rng, log=ui.item)
-            pv.save_phone_cache(cache_path, keyword, refs, tau, loo_mean)
-            ui.ok(f"cached refs + tau -> {os.path.relpath(cache_path, PROJECT_ROOT)}")
-    ui.kv("accept threshold tau", f"{tau:.3f}")
-
-    import librosa
-    from scoring import AUDIO_DIR
-    kept = dropped = 0
-    for chunk in results["chunks"]:
-        dets = chunk.get("detections") or []
-        if not dets:
-            continue
-        y, _ = librosa.load(os.path.join(AUDIO_DIR, chunk["file"]),
-                            sr=SAMPLE_RATE)
-        ok, sim = pv.verify_chunk(y, dets, window_seconds, refs, tau,
-                                  processor, model, torch)
-        chunk["phone_verified"] = ok
-        chunk["best_phone_sim"] = round(sim, 3)
-        if ok:
-            kept += 1
-            ui.ok(f"{chunk['file']}: verified (phone-sim {sim:.2f}, "
-                  f"{len(dets)} windows)")
-        else:
-            dropped += 1
-            chunk["detections"] = []
-            ui.warn(f"{chunk['file']}: rejected (phone-sim {sim:.2f} < "
-                    f"tau {tau:.2f}) - detections cleared")
-
-    results["phone_verification"] = {
-        "model": pv.PHONEME_MODEL, "tau": tau, "n_refs": len(refs),
-        "decode_span_s": pv.DECODE_SPAN_S,
-    }
-    _write_results(json_path, results, kept, dropped, t0)
-
-
 def main():
     ap = argparse.ArgumentParser(description="Verification of detections.")
     ap.add_argument("--keyword", default=None, help="defaults to selected_keyword.txt")
-    ap.add_argument("--stage", default=None, choices=["rival", "phone"],
-                    help="verifier stage; default = $SIAMESE_VERIFIER or 'rival'")
     ap.add_argument("--delta", type=float, default=None,
                     help="rival accept margin override; default = calibrated")
-    ap.add_argument("--tau", type=float, default=None,
-                    help="phone accept threshold override; default = cached")
-    ap.add_argument("--max-refs", type=int, default=8)
-    ap.add_argument("--seed", type=int, default=777)
     args = ap.parse_args()
 
     keyword = args.keyword
@@ -233,11 +147,7 @@ def main():
         keyword = open(kw_file).read().strip()
     keyword = keyword.lower()
 
-    stage = args.stage or os.environ.get("SIAMESE_VERIFIER", "rival")
-    if stage == "phone":
-        verify_phone(keyword, args)
-    else:
-        verify_rival(keyword, args)
+    verify_rival(keyword, args)
 
 
 if __name__ == "__main__":

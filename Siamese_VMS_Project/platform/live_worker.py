@@ -34,7 +34,7 @@ Architecture: downloading and detection are decoupled.
       window grid), then:
         detection          -> re-checked by the verification stage (default:
                               rival-anchor margins, core/rival_verify.py;
-                              SIAMESE_VERIFIER selects rival/phone/off); if
+                              SIAMESE_VERIFIER selects rival/off); if
                               it passes, chunk audio+video moved to
                               detections/<keyword>/ with a JSON record
         no detection       -> chunk audio+video deleted
@@ -556,8 +556,8 @@ def main():
     #   rival (default) - rival-anchor verification (core/rival_verify.py):
     #       synthesized phonetic near-neighbour anchors; a detection must
     #       beat every rival by the calibrated margin delta. No extra model.
-    #   phone - retired phone-CTC stage (core/phoneme_verify.py), for
-    #       ablation. off - disable. (Legacy SIAMESE_PHONE_VERIFY=0 -> off.)
+    #   off - disable. (Legacy SIAMESE_PHONE_VERIFY=0 -> off; the retired
+    #   phone-CTC stage lives on the archive/phone-verifier branch.)
     stage = os.environ.get("SIAMESE_VERIFIER", "").strip().lower()
     if not stage:
         stage = ("off" if os.environ.get("SIAMESE_PHONE_VERIFY", "1") == "0"
@@ -581,42 +581,6 @@ def main():
             rival = (rv, r_words, r_centroids, r_delta)
             status(f"Rival verifier ready ({len(r_words)} rivals, "
                    f"delta {r_delta:+.3f}): {', '.join(r_words[:5])}...")
-    phone = None
-    if stage == "phone":
-        import numpy as _np
-        import phoneme_verify as pv
-        from scoring import keyword_free_chunks
-        status(f"Loading phoneme verifier ({pv.PHONEME_MODEL.split('/')[-1]}) ...")
-        pv_processor, pv_model, pv_torch = pv.load_phoneme_model()
-        cache_path = os.path.join(data_root, "keywords",
-                                  f"{keyword}_phone_cache.json")
-        cached = pv.load_phone_cache(cache_path)
-        if cached:
-            refs, tau = cached
-            status(f"Phoneme refs + tau loaded from cache "
-                   f"({len(refs)} refs, tau={tau:.2f})")
-        else:
-            status("Building phoneme references from anchor variants ...")
-            variants_dir = os.path.join(data_root, "keywords",
-                                        f"{keyword}_variants")
-            refs, loo_mean = pv.build_references(
-                keyword, variants_dir, pv_processor, pv_model, pv_torch,
-                log=lambda m: status(f"  {m}"))
-            if refs:
-                status("Calibrating phone accept threshold on keyword-free "
-                       "chunks (one-time, ~2 min) ...")
-                tau = pv.calibrate_tau(
-                    refs, loo_mean, window_seconds, keyword_free_chunks(keyword),
-                    pv_processor, pv_model, pv_torch,
-                    _np.random.default_rng(777),
-                    log=lambda m: status(f"  {m}"))
-                pv.save_phone_cache(cache_path, keyword, refs, tau, loo_mean)
-                status(f"Phoneme verifier ready (tau={tau:.2f}, cached)")
-        if cached or refs:
-            phone = (refs, tau, pv_processor, pv_model, pv_torch, pv)
-        else:
-            status("No usable phoneme references - verifier disabled "
-                   "for this session")
 
     # -- 5. Live loop (endless: runs until the user clicks Finish) ----------
     downloader.setup_mode = False   # backlog policy: drop oldest, stay live
@@ -637,7 +601,6 @@ def main():
 
         # Precision stage: a detection must survive the second view before
         # the chunk is kept. Runs only when something fired.
-        phone_sim = None
         rival_margin = None
         nearest_rival = None
         reject_note = None
@@ -650,13 +613,6 @@ def main():
                 reject_note = (f"margin {rival_margin:+.3f} < delta "
                                f"{r_delta:+.3f} (nearest rival "
                                f"'{nearest_rival}')")
-        elif detections and phone is not None:
-            refs, tau, pv_processor, pv_model, pv_torch, pv = phone
-            ok, phone_sim = pv.verify_chunk(
-                y, detections, window_seconds, refs, tau,
-                pv_processor, pv_model, pv_torch)
-            if not ok:
-                reject_note = f"phone-sim {phone_sim:.2f} < tau {tau:.2f}"
         if reject_note is not None:
             top = detections[0]
             status(f"{name}: rejected confusable at {top['time']:.1f}s "
@@ -687,17 +643,12 @@ def main():
                            "detected_at": datetime.now().isoformat(timespec="seconds"),
                            "threshold": threshold,
                            "best_score": scan["best_score"],
-                           "phone_sim": phone_sim,
                            "rival_margin": rival_margin,
                            "nearest_rival": nearest_rival,
                            "detections": detections}, f, indent=2)
             top = detections[0]
-            if rival_margin is not None:
-                phone_note = f", rival margin {rival_margin:+.2f}"
-            elif phone_sim is not None:
-                phone_note = f", phone-sim {phone_sim:.2f}"
-            else:
-                phone_note = ""
+            phone_note = (f", rival margin {rival_margin:+.2f}"
+                          if rival_margin is not None else "")
             msg = (f"MATCH '{keyword}' in {name} at {top['time']:.1f}s "
                    f"(AS-norm {top['score']:.2f}, threshold {threshold:.2f}"
                    f"{phone_note}) -> saved {base}.mp4")

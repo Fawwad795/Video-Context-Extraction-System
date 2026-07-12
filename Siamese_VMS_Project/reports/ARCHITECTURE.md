@@ -42,8 +42,7 @@ Siamese_VMS_Project/
 │   ├── siamese_model.py   the legacy ("baseline") embedding model
 │   ├── embedders.py       the WavLM-based embedding backends (current default)
 │   ├── scoring.py         AS-norm scoring math, paths, config, env vars
-│   ├── rival_verify.py    rival-anchor verification of detections (default)
-│   ├── phoneme_verify.py  retired phone-CTC verification (kept for ablation)
+│   ├── rival_verify.py    rival-anchor verification of detections
 │   └── augment_utils.py   audio distortion effects (pitch/tempo/reverb/noise)
 │
 ├── pipeline/          the offline, step-by-step research pipeline (run as scripts)
@@ -104,7 +103,7 @@ flowchart TD
     VER --> OUT["logs/detections_&lt;keyword&gt;.json\n(rival-verified)"]
 ```
 
-Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The verification step at the end re-checks each detection through a *relative* contest — it must out-score the keyword's own synthesized confusable words ("rival anchors") — because an absolute score alone can confuse similar-sounding words (§14.3 describes the mechanism; the same module gates the live platform's detections; the retired phone-CTC alternative remains selectable for ablation). The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
+Both stages share the same embedding model (selected once via an environment variable, see §6) and the same set of file-naming conventions defined centrally in `core/scoring.py`. The verification step at the end re-checks each detection through a *relative* contest — it must out-score the keyword's own synthesized confusable words ("rival anchors") — because an absolute score alone can confuse similar-sounding words (§14.3 describes the mechanism; the same module gates the live platform's detections; the retired phone-CTC alternative is preserved on the archive/phone-verifier branch). The sections below walk through every box in this diagram in the order data actually flows, starting with how a keyword becomes an anchor.
 
 ---
 
@@ -374,7 +373,7 @@ The mechanics, step by step:
 3. **Arming gates:** each surviving rival is synthesized in the 7 canonical TTS voices and embedded; it is armed only if its own clips *lose* the margin contest decisively and the keyword's held-out positive voices *win* it clearly. Rivals the embedding cannot separate are dropped and logged — the stage self-reports its per-keyword rejection scope.
 4. **Verification:** margins are computed in AS-norm space (the same normalization the detector uses, which removes per-anchor bias), over a small grid of *full-word-scale* windows (0.8/1.0× the anchor window, ±0.25 s) around the detected event, pooled from the chunk's frame sequence exactly like every other window in the system. The event's margin is the best over that grid — a true keyword wins at some full-word alignment; a confusable wins at none. Detection windows themselves are *not* used for verification: they are often sub-word, and a 0.6-scale window on a genuine "administration" is acoustically "-istration".
 
-The stage runs only when a detection fires, adds no model (a few dot products against a dozen centroids), and its artifacts (`<keyword>_rivals*.npz`, rival clips) are cached per keyword. `SIAMESE_VERIFIER` selects the stage: `rival` (default), `phone` (the retired phone-CTC design, `core/phoneme_verify.py`, kept for ablation), or `off`. The platform never invokes `validate_detection.py` (that script remains an offline-only tool).
+The stage runs only when a detection fires, adds no model (a few dot products against a dozen centroids), and its artifacts (`<keyword>_rivals*.npz`, rival clips) are cached per keyword. `SIAMESE_VERIFIER` selects the stage: `rival` (default) or `off`; the retired phone-CTC design is preserved on the `archive/phone-verifier` branch. The platform never invokes `validate_detection.py` (that script remains an offline-only tool).
 
 ### 14.4 The GUI itself
 
@@ -471,7 +470,7 @@ Every environment variable below is read by `core/scoring.py` and inherited by a
 | `SIAMESE_ALLOW_UNTRAINED_HEAD` | unset | If set, `wavlm-trained` proceeds with an untrained (identity-init) head when no checkpoint file is found, instead of raising an error |
 | `SIAMESE_PROJECT_ROOT` | repo root | Redirects every path this project resolves (`keywords/`, `audios/`, `checkpoints/`, `logs/`) to a different root directory — the mechanism the live platform and the ablation study both use for isolation |
 | `SIAMESE_AUDIO_DIR` | `<root>/audios` | Which chunk-set directory the pipeline reads/scores against |
-| `SIAMESE_VERIFIER` | `rival` | Verification stage (§14.3): `rival` (rival-anchor, default), `phone` (retired phone-CTC, for ablation), or `off` |
+| `SIAMESE_VERIFIER` | `rival` | Verification stage (§14.3): `rival` (default) or `off`; the retired phone-CTC stage lives on `archive/phone-verifier` |
 | `SIAMESE_RIVAL_BANK` | `<code repo>/keywords/rival_bank<suffix>.npz` | Path override for the global rival word bank (a model-level artifact, resolved against the code repo rather than `SIAMESE_PROJECT_ROOT`) |
 | `SIAMESE_PHONE_VERIFY` | `1` | Legacy switch: `0` maps to `SIAMESE_VERIFIER=off` when `SIAMESE_VERIFIER` is unset |
 | `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` (set by `core/scoring.py`) | Force Hugging Face libraries to use only locally cached models, never attempt a network fetch |
@@ -493,8 +492,7 @@ python pipeline/keyword_generator.py --keyword <word>   # -> keywords/<word>_anc
 python pipeline/cohort_builder.py --keyword <word>       # -> keywords/cohort_<word>*.npz
 python pipeline/calibrate.py --keyword <word>            # -> keywords/<word>_calibration*.json
 python pipeline/detector.py --keyword <word>             # -> logs/detections_<word>.json
-python pipeline/verify_detections.py --keyword <word>    # rival-verifies detections (rewrites the JSON;
-                                                         #   --stage phone = retired CTC stage, ablation)
+python pipeline/verify_detections.py --keyword <word>    # rival-verifies detections (rewrites the JSON)
 python pipeline/validate_detection.py --keyword <word>   # compares detections vs. transcript
 ```
 

@@ -179,9 +179,8 @@ $$
   absolute threshold cannot ("policy"/"public" firing for *party* at
   scores above real hits) with zero extra models — a handful of dot
   products per detection. Artifacts: `keywords/<kw>_rivals*.npz`,
-  `keywords/<kw>_rivals/`. The retired phone-CTC stage
-  (`core/phoneme_verify.py`) remains available for ablation via
-  `SIAMESE_VERIFIER=phone`.
+  `keywords/<kw>_rivals/`. The retired phone-CTC stage is preserved on the
+  `archive/phone-verifier` branch.
 
 **Legacy baseline** (`SIAMESE_BACKEND=baseline`): frozen `wav2vec2-base` +
 Phase-1 linear projection head (`core/siamese_model.py`,
@@ -332,8 +331,7 @@ $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```
 7. **Rival-verify detections** (drops phonetic confusables via the keyword's
    synthesized rival anchors; rewrites the detections JSON, original backed
-   up as `*_unverified.json`; builds `<kw>_rivals*.npz` on first run —
-   `--stage phone` runs the retired phone-CTC stage instead, for ablation):
+   up as `*_unverified.json`; builds `<kw>_rivals*.npz` on first run):
    ```bash
    python pipeline/verify_detections.py --keyword cloudy
    ```
