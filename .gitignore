@@ -9,6 +9,7 @@ Extension/
 
 # --- Reference papers + proposal (copyrighted / kept local) ---
 Published_Paper_Reads_For_Extension/
+Journal_Paper/
 AI_Detector_Implementation_Plan.md
 APPROACH_COMPARISON.md
 *.pdf
@@ -46,10 +47,11 @@ VMS/
 
 # --- Generated KWS artifacts (rebuildable from the pipeline) ---
 Siamese_VMS_Project/keywords/
-Siamese_VMS_Project/logs/detections_*.json
+Siamese_VMS_Project/logs/
 Siamese_VMS_Project/logs/timestamps_*.txt
 Siamese_VMS_Project/logs/ab_*
 Siamese_VMS_Project/logs/backup_*/
+Siamese_VMS_Project/logs/phone_*/
 # audios/transcripts.txt and logs/archive/ are curated write-up evidence - tracked
 
 # --- Disposable experiment artifacts (local only) ---
