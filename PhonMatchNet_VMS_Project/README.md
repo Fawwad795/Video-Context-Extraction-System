@@ -1,18 +1,38 @@
 # G2P / Query-by-Text VMS Keyword Spotting (PhonMatchNet)
 
+> ## ROLE CHANGED - baseline comparator, not the project direction
+>
+> This approach was explored (June 2026) as a candidate replacement for the Siamese
+> design and was recommended at the time. **That recommendation was overturned in
+> July 2026**: a trained attentive-pooling head on frozen WavLM fixed the Siamese
+> ranking failure described below, and the Siamese cascade - now at detector-only
+> micro-F1 **1.000** / cascade **0.982** on Sets D/E/F - is the project's system.
+>
+> **This directory is now the PhonMatchNet baseline for the journal paper** (Prong 2,
+> LibriPhrase). Its checkpoints (`phonmatchnet_model/*.pt`) and LibriPhrase harness
+> are live assets for that comparison. Nothing here feeds the production pipeline.
+
+
 This is the **G2P (grapheme-to-phoneme) open-vocabulary** keyword-spotting approach
 for the Video Context Extraction System. It replaces the audio-anchor design of the
 [Siamese triplet approach](../Siamese_VMS_Project/) with a **text-enrolled** model:
 the user types a keyword, it is converted to phonemes, and the model aligns that
-phoneme sequence against the live audio — no synthesized/recorded audio anchor needed.
+phoneme sequence against the live audio - no synthesized/recorded audio anchor needed.
 
-## Why this approach
+## Why this approach was explored *(historical - June 2026)*
 
 The Siamese triplet method (Phase 1/2) failed on conversational speech because it
 compared a single mean-pooled audio-anchor embedding by distance, and **confusable
 words out-ranked the true keyword** (e.g. on the VMS chunks: `penalty` F1 = 0.00,
 `elon` F1 = 0.20). Enrolling the keyword as **text** and matching at the **phoneme
 level** fixes that ranking failure.
+
+**Update (July 2026):** the ranking failure was subsequently fixed *within* the
+Siamese approach - sub-center ArcFace training of an attentive-pooling head over
+frozen WavLM L10 with phonetic-confusable batch mining, plus rival-anchor
+verification at decision time. Text enrollment was therefore not required to solve
+it; the current system still takes keyword **text** as its only operator input and
+synthesizes its own audio anchor.
 
 ## Architecture (PhonMatchNet)
 
@@ -27,7 +47,7 @@ live audio ──► Google Speech Embedding ────┘            (+ raw a
 
 - **Text branch:** grapheme-to-phoneme (g2p_en) → phoneme embedding sequence.
 - **Audio branch:** raw waveform (→ internal log-mel) **and** a precomputed
-  Google Speech Embedding (96-d) — the model's `audio_input='both'` two-stream encoder.
+  Google Speech Embedding (96-d) - the model's `audio_input='both'` two-stream encoder.
 - **Matcher:** stacked self/cross-attention extractor + GRU discriminator → detection
   probability.
 
@@ -47,7 +67,7 @@ Trained on **LibriPhrase** (generated from LibriSpeech `train-clean-100`) on an 
 
 > Note: the upstream `train.py` saves checkpoints with `safetensors`, which silently
 > drops the GRU recurrent weights (shared-buffer bug). The trained model here was saved
-> with `torch.save(state_dict)` instead — it loads with all weights intact.
+> with `torch.save(state_dict)` instead - it loads with all weights intact.
 
 ## Result on the VMS chunks (apples-to-apples vs Siamese)
 
@@ -58,9 +78,9 @@ Trained on **LibriPhrase** (generated from LibriSpeech `train-clean-100`) on an 
 
 The true keyword now ranks **#1** in both cases (penalty: true 0.994 > all impostors;
 elon: true 0.515 > all impostors). Caveats: small test (2 keywords, 7 unique chunks),
-and per-keyword thresholds differ — production use needs per-keyword calibration.
+and per-keyword thresholds differ - production use needs per-keyword calibration.
 
-## Run locally (recommended) — `detect.py`
+## Run locally (recommended) - `detect.py`
 
 A **self-contained, portable detector** that runs on a normal PC (no docker, no AWS).
 It does both stages in one process: TensorFlow computes the Google Speech embedding,
@@ -94,12 +114,12 @@ python transcribe_chunks.py
 # 3. calibrate a per-keyword threshold from a NEGATIVE cohort (speech without the keyword)
 .venv-g2p\Scripts\python calibrate.py --keyword <word> --cohort-dir <negative_audio> --fa-percentile 99
 
-# 4. detect — uses the calibrated threshold automatically (override with --threshold)
+# 4. detect - uses the calibrated threshold automatically (override with --threshold)
 .venv-g2p\Scripts\python detect.py --keyword <word> --audio-dir new_chunks\audios --ground-truth <wavs>
 ```
 
-Steps 1–2 (`downloader.py`, `transcribe_chunks.py`) need `streamlink`/`moviepy`/
-`transformers` — run them in your system Python or `requirements-infra.txt`. Steps 3–4
+Steps 1-2 (`downloader.py`, `transcribe_chunks.py`) need `streamlink`/`moviepy`/
+`transformers` - run them in your system Python or `requirements-infra.txt`. Steps 3-4
 (`calibrate.py`, `detect.py`) run in the dedicated `.venv-g2p`.
 
 ### Per-keyword thresholds (`calibrate.py`)
@@ -107,7 +127,7 @@ Different keywords fire at different score scales (penalty ~0.99, trump ~0.2), s
 single global threshold can't work. `calibrate.py` scores the keyword against a cohort
 of negative audio and stores the high-percentile score in `calibration.json`, which
 `detect.py` loads automatically. **This fixes the threshold *scale*, not ranking
-inversions** — its ceiling is the model's reliability: if a negative spuriously
+inversions** - its ceiling is the model's reliability: if a negative spuriously
 out-scores a true positive (e.g. a chunk scoring 0.97 for "trump"), the percentile
 threshold rises and misses weak true positives. Use a **large, clean** negative cohort,
 and remember the remaining errors (confusables, spurious highs) need a stronger model
@@ -115,31 +135,31 @@ and remember the remaining errors (confusables, spurious highs) need a stronger 
 
 Notes from real runs: results vary by keyword. `penalty`/`elon`/`trump` rank the true
 chunk #1 (clean); short proper nouns (`iran` -> 0.000), confusables (`published` vs
-**`public`**), and spurious highs (`bloomberg`) still fail — consistent with ~28%
+**`public`**), and spurious highs (`bloomberg`) still fail - consistent with ~28%
 LP-Hard EER.
 
 ## Files
 
-- `detect.py` — **portable local detector** (both stages in one process; typed keyword
+- `detect.py` - **portable local detector** (both stages in one process; typed keyword
   → per-chunk detection + F1). The recommended entry point.
-- `phonmatchnet/` — **vendored** PhonMatchNet inference code from
+- `phonmatchnet/` - **vendored** PhonMatchNet inference code from
   [ncsoft/PhonMatchNet](https://github.com/ncsoft/PhonMatchNet) (BSD-3, see
   `phonmatchnet/LICENSE.txt`): `model/` (architecture), `dataset/g2p/` (grapheme→phoneme),
   `google_speech_embedding/` (the TF embedder + checkpoint). One local patch: `ukws.py`
   resolves `lin_to_mel_matrix.npy` relative to its own file (cwd-independent).
-- `phonmatchnet_model/phonmatchnet_epoch13.pt` — the trained model (best overall EER).
-- `requirements-g2p.txt` — the local environment (torch + TensorFlow 2.15 + audio deps).
-- `vms_gemb.py` / `vms_infer.py` — the original two-stage **docker** scripts used on the
+- `phonmatchnet_model/phonmatchnet_epoch13.pt` - the trained model (best overall EER).
+- `requirements-g2p.txt` - the local environment (torch + TensorFlow 2.15 + audio deps).
+- `vms_gemb.py` / `vms_infer.py` - the original two-stage **docker** scripts used on the
   AWS training host (kept for reproducing the benchmark there).
 
 ## Reproduce on the AWS training host (docker)
 
 ```bash
-# Stage A — Google embeddings (TF docker)
+# Stage A - Google embeddings (TF docker)
 docker run --rm -v <repo>:/home -v <chunks>:/c -v <out>:/out preprocess \
     bash -c 'cd /home/google_speech_embedding && cp /home/vms_gemb.py . && python vms_gemb.py'
 
-# Stage B — model inference + F1 (torch docker)
+# Stage B - model inference + F1 (torch docker)
 docker run --rm -v <repo>:/home -v <out>:/out udkws_torch \
     bash -c 'cd /home && python nltk_setup.py && python vms_infer.py'
 ```

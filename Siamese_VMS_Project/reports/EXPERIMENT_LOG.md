@@ -1,4 +1,4 @@
-# Siamese KWS — Consolidated Experiment Log
+# Siamese KWS - Consolidated Experiment Log
 
 One place for every detection experiment run with the Siamese pipeline, with
 pointers to the surviving artifacts. Complements `SIAMESE_PROGRESS_REPORT.md`
@@ -8,12 +8,12 @@ pointers to the surviving artifacts. Complements `SIAMESE_PROGRESS_REPORT.md`
 
 | Set | Period in `audios/` | Content | Status |
 |---|---|---|---|
-| A — scripted news | ≤ 2026-06-10 | BBC-style scripted delivery | retired, chunks deleted |
-| B — conversational debate | 2026-06-10 → 2026-07-02 | Elon Musk debate panel ("penalty", "elon", "appropriate") | retired, chunks deleted |
-| C — Iran deal report | 2026-07-02 (day) | correspondent report ("administration", "immigration", "washington") | retired, chunks deleted; transcript archived at `Reports/archive_chunksets/transcripts_setC_iran_deal_2026-07-02.txt` |
-| D — Sky News weather/news | since 2026-07-02 (evening) | UK weather bulletin into a news segue | **current** (`audios/Chunkset_D/`), all 10 chunks content-verified unique |
-| E — Iran deal report | added 2026-07-04 | correspondent report ("administration", "immigration") — same broadcast register as retired Set C but a fresh chunk pull | **current** (`audios/Chunkset_E/`); contains duplicated pairs (live_4≡6, live_5≡7) |
-| F — US Independence Day feature | 2026-07-04 | Sky News package on the US anniversary celebrations (Trump, state fair, vox pops) — **20 chunks**, first set larger than 10 | **current** (`audios/Chunkset_F/`), all 20 content-verified unique |
+| A - scripted news | ≤ 2026-06-10 | BBC-style scripted delivery | retired, chunks deleted |
+| B - conversational debate | 2026-06-10 → 2026-07-02 | Elon Musk debate panel ("penalty", "elon", "appropriate") | retired, chunks deleted |
+| C - Iran deal report | 2026-07-02 (day) | correspondent report ("administration", "immigration", "washington") | retired, chunks deleted; transcript archived at `Reports/archive_chunksets/transcripts_setC_iran_deal_2026-07-02.txt` |
+| D - Sky News weather/news | since 2026-07-02 (evening) | UK weather bulletin into a news segue | **current** (`audios/Chunkset_D/`), all 10 chunks content-verified unique |
+| E - Iran deal report | added 2026-07-04 | correspondent report ("administration", "immigration") - same broadcast register as retired Set C but a fresh chunk pull | **current** (`audios/Chunkset_E/`); contains duplicated pairs (live_4≡6, live_5≡7) |
+| F - US Independence Day feature | 2026-07-04 | Sky News package on the US anniversary celebrations (Trump, state fair, vox pops) - **20 chunks**, first set larger than 10 | **current** (`audios/Chunkset_F/`), all 20 content-verified unique |
 
 Since 2026-07-04 chunk sets live side by side under `audios/<Chunkset>/`
 (each with its own `transcripts.txt`); select one via `SIAMESE_AUDIO_DIR`.
@@ -39,28 +39,28 @@ from that stage have been removed.
 
 | Date | Keyword | Set | Anchor | Model | Threshold | TP/FP/FN | P / R / F1 | Artifact |
 |---|---|---|---|---|---|---|---|---|
-| 2026-06-10 | absolutely | A | TTS centroid | v1 baseline | 1.741 | — | F1 = 0.57 | `logs/archive/detections_absolutely_2026-06-10_tts_baseline_oldchunks.json` |
-| 2026-06-10 | heat | A | TTS centroid | v1 baseline | 2.244 | — | F1 = 0.80 | `logs/archive/detections_heat_2026-06-10_tts_baseline_oldchunks.json` |
+| 2026-06-10 | absolutely | A | TTS centroid | v1 baseline | 1.741 | - | F1 = 0.57 | `logs/archive/detections_absolutely_2026-06-10_tts_baseline_oldchunks.json` |
+| 2026-06-10 | heat | A | TTS centroid | v1 baseline | 2.244 | - | F1 = 0.80 | `logs/archive/detections_heat_2026-06-10_tts_baseline_oldchunks.json` |
 | 2026-06-11 | penalty | B | TTS centroid | v1 baseline | 2.464 | 0/4/2 | F1 = 0.00 | `logs/archive/detections_penalty_2026-06-11_tts_baseline_oldchunks.json` |
-| 2026-06-15 | elon | B | TTS centroid | v1 baseline | 1.252 (run 1) / 1.510 (run 2) | — | ~0.20 | `logs/archive/detections_elon_2026-06-15_run{1,2}_*.json` (two same-day runs, recalibrated threshold; kept both) |
-| 2026-07-02 | penalty | B | TTS centroid (baseline rerun) | v1 baseline | 1.594 | 0/7/2 | **F1 = 0.00** — true chunks scored 0.96, below all 7 FPs; "appropriate" fired at cos 0.985 | overwritten by the kNN-VC rerun; per-window hits preserved in `logs/archive/timestamps_penalty_2026-06-11_and_2026-07-02_runs.txt` |
+| 2026-06-15 | elon | B | TTS centroid | v1 baseline | 1.252 (run 1) / 1.510 (run 2) | - | ~0.20 | `logs/archive/detections_elon_2026-06-15_run{1,2}_*.json` (two same-day runs, recalibrated threshold; kept both) |
+| 2026-07-02 | penalty | B | TTS centroid (baseline rerun) | v1 baseline | 1.594 | 0/7/2 | **F1 = 0.00** - true chunks scored 0.96, below all 7 FPs; "appropriate" fired at cos 0.985 | overwritten by the kNN-VC rerun; per-window hits preserved in `logs/archive/timestamps_penalty_2026-06-11_and_2026-07-02_runs.txt` |
 | 2026-07-02 | penalty | B | **kNN-VC converted** | v1 baseline | 2.166 | 2/4/0 | **P 0.33 / R 1.00 / F1 = 0.50** | `logs/archive/detections_penalty_2026-07-02_knnvc_anchor_oldchunks.json` |
 | 2026-07-02 | administration | C | **kNN-VC converted** | v1 baseline | 2.341 | 1/3/0 | **P 0.25 / R 1.00 / F1 = 0.40** | `logs/detections_administration_unverified.json` |
 | 2026-07-02 | administration | C | kNN-VC + **phoneme verification (retired)** | v1 baseline + wav2vec2-espeak CTC | 2.341 / tau 0.716 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | artifact removed |
-| 2026-07-02 | washington | C | **kNN-VC converted** (detector alone) | v1 baseline | 2.610 | 1/2/0 | P 0.33 / R 1.00 / F1 = 0.50 — and the live_9 "TP" was accidental: windows fired on "understanding" at 2.0s, not "washington" at 4.2s | `logs/detections_washington_unverified.json` |
+| 2026-07-02 | washington | C | **kNN-VC converted** (detector alone) | v1 baseline | 2.610 | 1/2/0 | P 0.33 / R 1.00 / F1 = 0.50 - and the live_9 "TP" was accidental: windows fired on "understanding" at 2.0s, not "washington" at 4.2s | `logs/detections_washington_unverified.json` |
 | 2026-07-02 | washington | C | kNN-VC + **phoneme verification + candidate rescue (retired)** | v1 baseline + wav2vec2-espeak CTC | 2.610 / tau 0.604 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | artifact removed |
 | 2026-07-02 | **russia** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.408 / tau 0.718 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | superseded by Step 3 run |
 | 2026-07-02 | **weather** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 2.126 / tau 0.750 | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** | superseded by Step 3 run |
 | 2026-07-02 | **scotland** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.793 / tau 0.707 | 3/1/0 | P 0.75 / R 1.00 / F1 = 0.86 | superseded by Step 3 run |
 | 2026-07-02 | **ireland** | **D** | kNN-VC + phoneme verification (retired) | full cascade | 1.581 / tau 0.839 | 2/0/1 | P 1.00 / R 0.67 / F1 = 0.80 | superseded by Step 3 run |
-| **2026-07-02** | **4-keyword micro-avg** | **D** | kNN-VC + phoneme verification (retired) | full cascade | — | 7/1/1 (40 chunk-decisions) | **P 0.875 / R 0.875 / F1 = 0.875** (macro-avg F1 = 0.915) | historical baseline — see "Set D validation" below |
-| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm (frozen L10 mean-pool), detector alone** | per-keyword calibrated | 1/0/8 (50 chunk-decisions) | **P 1.00 / R 0.11 / F1 = 0.20** — only russia crossed its threshold; ranking was perfect but absolute scores were too low | `logs/backup_setD_wavlm10/detections_*_unverified.json` |
-| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** — all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03) — see "Step 3" below | `logs/detections_*.json` (current) |
-| 2026-07-03 | outbreaks | D | kNN-VC converted | wavlm-trained, detector alone | 1.729 (aligned-p100) | 1/0/1 | P 1.00 / R 0.50 / F1 = 0.67 — live_7 direct hit (+1.74); live_2 FN is a chunk-boundary case (keyword ends 30 ms before chunk end, no fully-contained window) — see "Sixth keyword" under Step 3 | `logs/detections_outbreaks.json` |
-| 2026-07-03 | insurance | D | kNN-VC converted | wavlm-trained, detector alone | 0.669 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — single true chunk (live_8, "...travel insurance proudly sponsors...") direct hit at 5.58 (+4.91 margin, cos 0.913, 27 windows above threshold); tightest negative (live_7) sat at 0.67, right at but not over threshold | `logs/detections_insurance.json` |
-| 2026-07-04 | western | D | kNN-VC converted | wavlm-trained, detector alone, combined_best defaults | 6.228 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — first run with the ablation sweet-spot defaults baked in; pipeline 2.7 min end-to-end | `logs/detections_western.json` |
+| **2026-07-02** | **4-keyword micro-avg** | **D** | kNN-VC + phoneme verification (retired) | full cascade | - | 7/1/1 (40 chunk-decisions) | **P 0.875 / R 0.875 / F1 = 0.875** (macro-avg F1 = 0.915) | historical baseline - see "Set D validation" below |
+| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm (frozen L10 mean-pool), detector alone** | per-keyword calibrated | 1/0/8 (50 chunk-decisions) | **P 1.00 / R 0.11 / F1 = 0.20** - only russia crossed its threshold; ranking was perfect but absolute scores were too low | `logs/backup_setD_wavlm10/detections_*_unverified.json` |
+| 2026-07-03 | **5-keyword micro-avg** | **D** | kNN-VC converted | **wavlm-trained (Step 3 attentive head), detector alone** | per-keyword, aligned-p100 | 9/0/0 (50 chunk-decisions) | **P 1.00 / R 1.00 / F1 = 1.00** - all 9 true chunks are DIRECT threshold hits (margins +1.01..+5.03) - see "Step 3" below | `logs/detections_*.json` (current) |
+| 2026-07-03 | outbreaks | D | kNN-VC converted | wavlm-trained, detector alone | 1.729 (aligned-p100) | 1/0/1 | P 1.00 / R 0.50 / F1 = 0.67 - live_7 direct hit (+1.74); live_2 FN is a chunk-boundary case (keyword ends 30 ms before chunk end, no fully-contained window) - see "Sixth keyword" under Step 3 | `logs/detections_outbreaks.json` |
+| 2026-07-03 | insurance | D | kNN-VC converted | wavlm-trained, detector alone | 0.669 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** - single true chunk (live_8, "...travel insurance proudly sponsors...") direct hit at 5.58 (+4.91 margin, cos 0.913, 27 windows above threshold); tightest negative (live_7) sat at 0.67, right at but not over threshold | `logs/detections_insurance.json` |
+| 2026-07-04 | western | D | kNN-VC converted | wavlm-trained, detector alone, combined_best defaults | 6.228 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** - first run with the ablation sweet-spot defaults baked in; pipeline 2.7 min end-to-end | `logs/detections_western.json` |
 | 2026-07-04 | sunny / windy / showers | D | **TTS centroid AND kNN-VC converted (both)** | wavlm-trained, detector alone | per-keyword aligned-p100 | 3/0/0 each way | **F1 = 1.00 both with and without kNN-VC, all 3 keywords** (kNN-VC retirement ablation) | `ablation_study/results/knnvc_ablation.jsonl` |
-| 2026-07-04 | administration | **E** | **TTS centroid (no kNN-VC)** | wavlm-trained, detector alone | 3.276 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** — near-homophone "immigration" chunk rejected at 2.04; compare F1 0.40 for the same keyword on Set C under v1 baseline + kNN-VC | `logs/detections_administration.json` |
+| 2026-07-04 | administration | **E** | **TTS centroid (no kNN-VC)** | wavlm-trained, detector alone | 3.276 (aligned-p100) | 1/0/0 | **P 1.00 / R 1.00 / F1 = 1.00** - near-homophone "immigration" chunk rejected at 2.04; compare F1 0.40 for the same keyword on Set C under v1 baseline + kNN-VC | `logs/detections_administration.json` |
 
 Note: `detector.py` labels every `.npz` anchor "TTS prototype centroid" in the
 JSON; for the 2026-07-02 rows the anchor was actually the kNN-VC-converted
@@ -102,7 +102,7 @@ for a good score:
 Both errors are explainable under the v1 baseline + retired verification
 stage, not systemic domain-gap failures:
 - scotland's FP (live_6, "...south of **Ireland** can expect...") crossed
-  the embedding threshold by a hair — a near-miss the retired phoneme gate
+  the embedding threshold by a hair - a near-miss the retired phoneme gate
   almost caught.
 - ireland's FN is the same chunk (live_6): sliding windows did not land
   squarely on the spoken instant. Precision stayed perfect elsewhere,
@@ -114,15 +114,15 @@ audio outside its enrollment domain. **Current claim (2026-07-03):** the
 trained attentive-head detector achieves detector-only micro F1 1.00 on Set D
 + brighten with aligned p100 calibration (Step 3 section below).
 
-## Step 3: trained attentive head — detector crosses threshold without rescue (2026-07-03)
+## Step 3: trained attentive head - detector crosses threshold without rescue (2026-07-03)
 
 Problem: with the frozen wavlm-L10 mean-pool backend the detector RANKED
 Set D perfectly (AP 1.0) but real keyword windows rarely CROSSED the
-calibrated threshold — detector-only micro F1 0.20 (recall 1/9). Step 3
+calibrated threshold - detector-only micro F1 0.20 (recall 1/9). Step 3
 lifts absolute real-speech scores, not just ranking.
 
 **Model** (`core/embedders.py`): `AttentivePoolingHead` on frozen
-WavLM-base-plus layer-10 frames — 4-head attentive pooling (ICASSP-2021
+WavLM-base-plus layer-10 frames - 4-head attentive pooling (ICASSP-2021
 QbE style) + residual MLP projection, 5.5M params, zero-init so the
 untrained head is bit-identical to the validated mean-pool operating
 point. Exposed as `SIAMESE_BACKEND=wavlm-trained` (artifacts `_wavlm10ft`,
@@ -143,25 +143,25 @@ cosine collapsed 0.296 → 0.005 while positives held ~0.47
 **Two calibration artifacts surfaced by the sharper embedding** (both are
 protocol bugs the old blunt embedding masked, fixed in `calibrate.py` /
 `core/scoring.py`):
-1. **Negative-sample leakage** — calibration negatives were sampled from
+1. **Negative-sample leakage** - calibration negatives were sampled from
    ALL chunks, including keyword-bearing ones; the trained head scores
    those so high that the p99.5 "false-alarm" threshold was being set BY
    the keyword itself (scotland: threshold 1.98 vs true windows 1.85; the
    top 2 of 400 "negatives" were the keyword). Fix: negatives come from
    keyword-free chunks only (transcript token check, same guard as the
    kNN-VC reference pool).
-2. **Scoring-protocol mismatch** — negatives were embedded as isolated
+2. **Scoring-protocol mismatch** - negatives were embedded as isolated
    windows (own forward pass) while the detector pools windows from a
    chunk-level pass; the two land in measurably different regions
    (scotland clean-negative max −0.18 isolated vs +0.62 chunk-pooled).
    Fix: `sample_stream_window_embeddings()` embeds calibration negatives
    through the detector's own path (chunk-context pooling, all 3 window
-   scales, 50 ms grid) — every keyword-free window, no subsampling — and
+   scales, 50 ms grid) - every keyword-free window, no subsampling - and
    the threshold is max(negatives)+1e-4 (`--fa-percentile 100`; the
    epsilon covers float32 BLAS jitter ~1e-7 between identical windows
    scored in different batch shapes).
 
-**Result (Set D + brighten, detector alone)** — same
+**Result (Set D + brighten, detector alone)** - same
 transcript-token ground truth as always, `pipeline/validate_detection.py`:
 
 | Keyword | TP | FP | FN | Threshold | min TP hit − thr | F1 |
@@ -173,13 +173,13 @@ transcript-token ground truth as always, `pipeline/validate_detection.py`:
 | brighten | 1 | 0 | 0 | 0.362 | +4.28 | 1.00 |
 | **micro (50 decisions)** | 9 | 0 | 0 | | | **1.00** |
 
-Notable: ireland recall is now 3/3 — live_6, whose occurrence the old
-baseline pipeline could not land on reliably, is a direct hit at +1.01 — and
+Notable: ireland recall is now 3/3 - live_6, whose occurrence the old
+baseline pipeline could not land on reliably, is a direct hit at +1.01 - and
 ireland's threshold is literally set one epsilon above the "Island"
 near-homophone chunk (live_5, 1.5578), which the embedding scores just below
 every true "Ireland" (≥2.57). brighten, previously F1 0.50 under the v1
-baseline, is a clean 1.00. True hits carry 34–102 windows above threshold;
-every false positive observed at looser operating points carried 1–15.
+baseline, is a clean 1.00. True hits carry 34-102 windows above threshold;
+every false positive observed at looser operating points carried 1-15.
 
 Operating-point ablation (all with the leakage guard): isolated-window
 negatives p99.5 → micro F1 0.78 (recall 1.00, 5 FPs); p100 → 0.82;
@@ -189,9 +189,9 @@ aligned-protocol p100+eps → **1.00**. The pre-guard baseline was 0.71
 
 Caveats: 10 chunks × 5 keywords from one broadcast; thresholds are
 per-keyword data-fitted on keyword-free deployment audio (no manual
-tuning, but max-statistics on ~2.4k–30k windows are noisier than
-percentiles — watch FA rate on longer streams). Reproducibility: calibrate
-(seed 777) + cohort (seed 123) are deterministic — a from-scratch scotland
+tuning, but max-statistics on ~2.4k-30k windows are noisier than
+percentiles - watch FA rate on longer streams). Reproducibility: calibrate
+(seed 777) + cohort (seed 123) are deterministic - a from-scratch scotland
 re-run reproduced threshold 0.622 and the identical 3 detections.
 
 ### Sixth keyword, "outbreaks" (2026-07-03): the chunk-boundary failure mode
@@ -201,12 +201,12 @@ convert_anchor_knnvc → cohort → aligned-p100 calibrate → detector), truth 
 2 of 10 chunks (live_2, live_7). Detector-only: **P 1.00 / R 0.50 / F1
 0.67** (threshold 1.729), `logs/detections_outbreaks.json`.
 
-- live_7 ("...cloudy with outbreaks of rain...") — direct hit, 3.47
+- live_7 ("...cloudy with outbreaks of rain...") - direct hit, 3.47
   (+1.74 margin, 41 windows above threshold, cos 0.702).
-- live_2 ("...will see more prolonged outbreaks.") — **FN at 1.14**.
-  Whisper word timing places the keyword at 4.54–4.98 s of a 5.01 s
+- live_2 ("...will see more prolonged outbreaks.") - **FN at 1.14**.
+  Whisper word timing places the keyword at 4.54-4.98 s of a 5.01 s
   chunk: it ends 30 ms before the chunk boundary, so no sliding window
-  can bracket it — a full-scale (0.67 s) window starting at word onset
+  can bracket it - a full-scale (0.67 s) window starting at word onset
   would run past the chunk end. The best physical window (4.36 s, scale
   0.8) clips the final /s/ and includes the tail of "prolonged"
   (cos 0.478 vs 0.702 for the clean hit).
@@ -214,7 +214,7 @@ convert_anchor_knnvc → cohort → aligned-p100 calibrate → detector), truth 
 This is an alignment/boundary case, NOT calibration: live_0's hottest
 keyword-free window scores 1.73 > live_2's 1.14, so no threshold yields
 2TP/0FP (p99.5 = 1.151 still misses by 0.011; p99 = 0.861 catches live_2
-but admits 2 FPs — F1 unchanged at 0.67, and the FA-bounded-by-
+but admits 2 FPs - F1 unchanged at 0.67, and the FA-bounded-by-
 construction property of the p100 threshold is lost). Detector/calibration
 parameter changes were evaluated and rejected on those tradeoffs.
 Structural fix: overlap consecutive chunks by ~1 s in downloader.py / the
@@ -233,14 +233,14 @@ showed the Step-3 trained head makes it redundant:
 1. **Accidental ablation.** A defaults-sync bug (convert_anchor_knnvc.py
    `--holdout` 6 vs keyword_generator.py's new 4) made the conversion
    silently no-op (bare `return`, exit 0) for the `voices_7`/`combined_best`
-   pipeline-parameter ablation configs — which still scored micro F1 1.00
+   pipeline-parameter ablation configs - which still scored micro F1 1.00
    on all 5 Set D keywords with the raw TTS anchor.
 2. **Deliberate ablation** (`ablation_study/knnvc_ablation.py`, archived
    branch): with the bug fixed, 3 fresh Set D keywords (sunny, windy,
-   showers) run both ways — F1 1.00 identical, kNN-VC only adding ~50 s
+   showers) run both ways - F1 1.00 identical, kNN-VC only adding ~50 s
    per keyword. Then `administration` on the new Set E without kNN-VC:
    F1 1.00 with the near-homophone "immigration" rejected (2.04 vs
-   threshold 3.28) — the confusable-pair failure mode that motivated
+   threshold 3.28) - the confusable-pair failure mode that motivated
    kNN-VC in the first place (penalty/appropriate, F1 0.00, finding 1).
 
 9/9 keywords across two chunk sets show no F1 benefit. The stage was
@@ -256,7 +256,7 @@ the stage was active.
 chunks, no transcripts) can sample a chunk containing the keyword itself
 as a "negative." Since fa_percentile=100 sets the threshold to the
 highest-scoring negative window + ε, the threshold gets set to that
-utterance's own score — a guaranteed miss. Observed across four keywords
+utterance's own score - a guaranteed miss. Observed across four keywords
 on the live platform, each missing the exact utterance that contaminated
 its own calibration by one epsilon: `south` (4.3851 vs threshold 4.3852),
 `brain` (5.74 vs 5.743), `morning` (5.46 vs 5.463), `mexico` (7.24 vs
@@ -267,48 +267,48 @@ tried, all reverted (commit `181ea7f`, restoring `core/scoring.py`,
 `pipeline/calibrate.py`, `pipeline/cohort_builder.py`,
 `platform/live_worker.py` to their pre-saga state at `706a275`):**
 
-1. *Score-in-positive-range excision* — a percentile-based reference from
+1. *Score-in-positive-range excision* - a percentile-based reference from
    the ~12 TTS positives was too fragile at that sample size (jumped
    either too strict, missing real leaks, or too loose, misidentifying
    genuine hard negatives as leaks and regressing leak-free calibration).
-2. *Temporal-burst clustering* — sliding-window overlap means ANY
+2. *Temporal-burst clustering* - sliding-window overlap means ANY
    strongly-matching moment, keyword or confusable, produces the same
    clustering signature; not discriminative, also regressed clean data.
 3. *Generalized Pareto (EVT) tail fit* (`scoring.evt_threshold`, kept as
-   an opt-in research flag, not the default) — the most informative
+   an opt-in research flag, not the default) - the most informative
    negative result: a rigorous tail fit built from hundreds of points, not
    one heuristic, still judged the leaked score statistically
    unremarkable. No per-sample statistic can tell a leak apart from an
    equally-extreme confusable, because that overlap is *why* p100 rather
    than a percentile is the right rule to begin with.
-4. *Fixed-tolerance periodic recalibration* — excluding a small fixed
+4. *Fixed-tolerance periodic recalibration* - excluding a small fixed
    count of a growing pool's top scores before taking the max forces the
    threshold below scores already known to be negatives once the pool is
    small (a live `morning` session: threshold 5.463 → 2.065 on 6 pooled
-   chunks, ~7 clean chunks then fired as false positives — a sweep).
-5. *Held-chunk leave-one-out adjudication* — held no-match chunks until
+   chunks, ~7 clean chunks then fired as false positives - a sweep).
+5. *Held-chunk leave-one-out adjudication* - held no-match chunks until
    real bootstrap-scale evidence existed (30 chunks), then ran one
    adjudication: the highest-scoring held chunk fires only if it beats
    every other held chunk AND sits at the current threshold's epsilon. No
-   tolerance, so no sweep — but bounded to recovering **at most one**
+   tolerance, so no sweep - but bounded to recovering **at most one**
    contaminated chunk per session by construction. A live `mexico` session
    (a Mexico-focused broadcast, where the word is common rather than rare)
    broke this differently: at least 6 genuine utterances were present
    among the first 30 held chunks; only 1 was recovered, the other 5+
    were permanently deleted in that same pass, and the recalibrated
-   threshold was itself set by a second real utterance — so any future
+   threshold was itself set by a second real utterance - so any future
    utterance at or below that new ceiling kept missing.
 
 **Root cause of all five failures:** none of them use any information
 beyond the score distribution itself, and a leaked keyword's score is
 provably indistinguishable from a legitimate hard negative's using score
-statistics alone (confirmed directly by finding 3 above) — worse, when
+statistics alone (confirmed directly by finding 3 above) - worse, when
 the keyword recurs often, "at most one recoverable" is a hard ceiling no
 tuning of any of these designs can lift.
 
 **The fix: restore what the offline research pipeline always relied on.**
 `calibrate.py`'s `keyword_free_chunks()` transcript guard already existed
-and needs no code change — it was a no-op on the platform only because no
+and needs no code change - it was a no-op on the platform only because no
 transcript ever existed there. `platform/live_worker.py` now runs
 `transcribe_chunks.py --limit <bootstrap-chunks>` once, right after the
 bootstrap wait and before cohort/calibration, writing
@@ -327,7 +327,7 @@ transcription-free alternatives (all five above) - reconsidered once
 `mexico` session's platform data was gone (cleared), so the fix was
 validated by simulating a fresh platform bootstrap against Chunkset D's
 10 chunks with no `transcripts.txt` present (copied without it, mirroring
-a raw platform download) — the same multi-occurrence stress case
+a raw platform download) - the same multi-occurrence stress case
 `mexico` exposed, since `scotland` occurs 3 times in that set:
 1. `keyword_generator.py --keyword scotland` → anchor built normally.
 2. `transcribe_chunks.py --limit 10` (whisper-base) → all 3 "Scotland"
@@ -335,9 +335,9 @@ a raw platform download) — the same multi-occurrence stress case
    transcript exactly.
 3. `cohort_builder.py` + `calibrate.py --keyword scotland` → threshold
    2.315, n_neg=2316 (7 keyword-free chunks' windows, correctly excluding
-   all 3 scotland-bearing chunks at once — not just the highest-scoring
+   all 3 scotland-bearing chunks at once - not just the highest-scoring
    one), margin +1.452 (healthy, no domain-gap warning).
-4. `detector.py` + `validate_detection.py` → **TP=3 FP=0, F1=1.00** — all
+4. `detector.py` + `validate_detection.py` → **TP=3 FP=0, F1=1.00** - all
    3 occurrences detected, matching the pipeline's historical
    oracle-calibration result on this keyword exactly.
 
@@ -352,13 +352,13 @@ Three consecutive live platform sessions (keywords 'world', 'russia',
 forced, plus windowed re-transcription of each suspected false positive)
 established a consistent failure signature: **true hits clear the
 calibrated threshold comfortably while false positives enter within ~1
-unit of it** — world 2 FP (3.93/4.09 vs thr 3.79, TPs >= 4.70), russia
+unit of it** - world 2 FP (3.93/4.09 vs thr 3.79, TPs >= 4.70), russia
 4 FP (2.92-3.67 vs thr 2.65, TPs >= 4.93). The gap-based safety margin
 (commit ae3dffe) was fitted to exactly that band.
 
 The 'party' session (272 chunks, margin active, thr 4.701 = base 3.394 +
 1.307) broke the pattern: 9 detections = 6 TP / 3 FP, and FP "policy"
-scored **8.17 — above the real TP at 6.13**. The confusables were all
+scored **8.17 - above the real TP at 6.13**. The confusables were all
 phonetic near-neighbours ("policy" x2, "publicly", "public" vs /pɑɹti/).
 No threshold can separate overlapping bands, and every cheap structural
 signal fails with the embedding score because it is a function of the same
@@ -369,22 +369,22 @@ to be chunks downloaded after the session stopped, never scanned; re-scanned
 they score 8.5-9.8 and are real mentions).
 
 **Fix: resurrect the Stage-3 phoneme verifier** (removed in df141b4 when
-the trained head made it unnecessary for *recall* on Set D — the live
+the trained head made it unnecessary for *recall* on Set D - the live
 confusable regime is where its *precision* role was needed), with three
 changes over the retired design, each forced by measured failures:
 
 1. **Reference outlier filter.** The ksp TTS voice renders 'party' as
-   /ph ɑ l i/ — a reference that would MATCH "policy". Leave-one-out
+   /ph ɑ l i/ - a reference that would MATCH "policy". Leave-one-out
    agreement (drop refs < 0.5 vs the rest) removes it automatically
    (agreement 0.25 vs 1.00 for the other six voices).
 2. **Wide-span decode instead of per-window probing.** The old
    narrow-window scheme (window + 0.08 s pad, +/-100 ms probes) clips word
    edges (TP live_44 decoded /p ɑu5 ɕ i5/ at its top window) and hands
-   confusables a decode-noise lottery — "policy" hit 0.75 once across 147
+   confusables a decode-noise lottery - "policy" hit 0.75 once across 147
    narrow decodes, and reproducibly in 17. Decoding ONE ~2.5 s span per
    detection event (detections time-clustered at 0.3 s gap) gives the CTC
    full acoustic context: every TP decodes a clean /p ɑːɹ ɾ i/ in-context
-   (all 1.00), every confusable decodes as itself — /p ɔ l ə s i/,
+   (all 1.00), every confusable decodes as itself - /p ɔ l ə s i/,
    /p ʌ b l ɪ k/ (all 0.25). The infix matcher's free ends make the
    surrounding words cost nothing and accept derivatives (/p ɑːɹ ɾ i z/).
 3. **tau calibration mirrors the decision statistic** (max over ~2 wide
@@ -393,14 +393,14 @@ changes over the retired design, each forced by measured failures:
 
 End-to-end on the party session with the production code
 (`core/phoneme_verify.py`, wired into `platform/live_worker.py` and
-`pipeline/verify_detections.py`): **12/12 chunks correct** — 9 real
+`pipeline/verify_detections.py`): **12/12 chunks correct** - 9 real
 keyword chunks kept at phone-sim 1.00 (6 fired + the 3 late unscanned
 ones re-run as future detections), 3 confusables rejected at 0.25.
 
 A ground-truth correction the verifier itself surfaced: whisper-base
 transcribes live_115 as "any political **policy** in the country", but
 whisper-small, wav2vec2-base-960h (char CTC) and the espeak phone CTC all
-hear "political **party**" — consistent with its 8.17 embedding score.
+hear "political **party**" - consistent with its 8.17 embedding score.
 Chunk-level metrics that use a single ASR model as ground truth inherit
 that model's confusions.
 
@@ -424,36 +424,36 @@ detection only if a full-word-scale window around it beats every armed rival
 by a calibrated AS-norm margin. Every design element was forced by a measured
 failure during bring-up, in order:
 
-1. *Embedding-space rival selection* — phone edit distance never surfaces the
+1. *Embedding-space rival selection* - phone edit distance never surfaces the
    live-observed confusables ("policy" is party's 845th phone neighbour,
    "public" its 31,727th); ranking a global TTS word bank (4k frequent words
    from the Whisper BPE vocabulary, one voice each) by anchor proximity finds
    policy at #6. Two-stage union: lexicon neighbours + bank neighbours.
-2. *Effective-homophone exclusion* — arming "island" against ireland rejected
+2. *Effective-homophone exclusion* - arming "island" against ireland rejected
    all 3 real ireland chunks (margins −0.28..−0.57): broadcast /aɪɚlənd/ with
    reduced /ɚ/ IS /aɪlənd/. Single-edit pairs whose edit is schwa-family are
    excluded as out of acoustic scope (matches the phone stage's 0.80-vs-0.81
    squeeze on the same pair).
-3. *Phone-substring exclusion* (schwa-normalized ≥0.7 contiguous overlap) —
+3. *Phone-substring exclusion* (schwa-normalized ≥0.7 contiguous overlap) -
    "ministration" rejected genuine "administration" windows: 0.6-scale
    detection windows legitimately cover partial words, so any rival that is a
    partial rendering of the keyword rejects the keyword itself. Same rule
    catches part/partly for party.
-4. *Per-rival arming gates* — rival's own clips must lose by ≥0.15 AS-norm
+4. *Per-rival arming gates* - rival's own clips must lose by ≥0.15 AS-norm
    margin AND the keyword's holdout positives must beat it by ≥0.30 (p10);
    dropped pardee/pardi/pardy (D↔T voicing neighbours of party) and generic
    "-ation" words whose tight clean centroids out-compete the diffuse
    augmented anchor.
-5. *AS-norm margins* (not raw cosine — anchor-construction bias) and
+5. *AS-norm margins* (not raw cosine - anchor-construction bias) and
    *full-word alignment-search verification* (0.8/1.0× anchor window,
-   ±0.25 s grid around the trigger, margin = max over grid) — verifying on
+   ±0.25 s grid around the trigger, margin = max over grid) - verifying on
    the sub-word detection windows themselves replays failure 3 from the
    audio side: the top windows of a true "administration" are acoustically
    "-istration" and lose to "information".
 
 **Validation so far** (real audio unless noted):
 - ireland on D: 3/3 verified at margins +1.98..+2.15 (nearest armed rival
-  "iceland") — including live_6, the phone stage's only cascade miss.
+  "iceland") - including live_6, the phone stage's only cascade miss.
 - administration on E: TP verified +0.45; forced-event probe on the real
   "immigration" chunk rejected at −1.58.
 - party/policy regression (synthetic proxy; the live session's audio is
@@ -463,13 +463,13 @@ failure during bring-up, in order:
 - Full 14-eval rival-vs-phone head-to-head on identical fresh detector
   outputs (2026-07-12, final constants: delta = rival max + 0.2 x gap,
   overlap bar 0.65): **RAV cascade 27/28 TP, 0 FP, micro F1 0.982 = phone
-  cascade 27/28, 0.982 — complementary single failures.** RAV's miss is
+  cascade 27/28, 0.982 - complementary single failures.** RAV's miss is
   the boundary-truncated outbreaks live_2 (no full-word verification
   window exists at a chunk edge; ingestion overlap is the fix); phone's
   miss is ireland live_6 (tau squeezed by "Island"). Detector-only stays
   28/28 (1.000). Two calibration-constant bugs were found and fixed by
   the sweep itself: a midpoint delta rule clipped real america hits that
-  WON their contest (margins +2.1/+3.0 vs delta 3.17 — rule changed to
+  WON their contest (margins +2.1/+3.0 vs delta 3.17 - rule changed to
   rival-max + 0.2 x gap, house style), and "westward" (0.667 overlap,
   shared stressed onset + reduced tail) false-rejected western until the
   substring bar moved 0.7 -> 0.65. RAV is the default stage; phone kept
@@ -478,7 +478,7 @@ failure during bring-up, in order:
 Cost: no second model (the phone stage loaded ~1.2 GB wav2vec2-large);
 verification is a few dot products against ~a dozen rival centroids.
 One-time artifacts: global bank ~2 h CPU per backend; per-keyword rivals
-~1–2 min (TTS) cached in `keywords/<kw>_rivals*.npz`.
+~1-2 min (TTS) cached in `keywords/<kw>_rivals*.npz`.
 
 ## Key findings
 
@@ -500,14 +500,14 @@ One-time artifacts: global bank ~2 h CPU per backend; per-keyword rivals
    crossing the aligned p100 threshold directly.
 4. **Aligned calibration protocol matters once scores sharpen.** Negatives
    must come from keyword-free chunks only, and must be embedded through
-   the detector's own chunk-pooled window path — isolated-window negatives
+   the detector's own chunk-pooled window path - isolated-window negatives
    underestimated false-alarm rates and admitted 5 FPs at p99.5.
 5. Anchor references decode cleanly in both domains
    (/æ d m ɪ n ɪ s t ɹ eɪ ʃ ə n/ from TTS and from kNN-VC-converted
    clips alike), confirming phonetic content is preserved through kNN-VC
    even when embedding space was domain-sensitive.
 6. **The trained head subsumes kNN-VC.** Once finding 3's head is in place,
-   removing kNN-VC costs nothing on 9/9 keywords tested — including the
+   removing kNN-VC costs nothing on 9/9 keywords tested - including the
    confusable-pair case (administration/immigration) that finding 2's fix
    existed for. Retired 2026-07-04 (section above); the domain gap is now
    closed in embedding space rather than in audio space.
@@ -546,26 +546,26 @@ One-time artifacts: global bank ~2 h CPU per backend; per-keyword rivals
    −1.1..−1.5) while true keyword audio wins at some full-word alignment.
    What actually failed in the live 'party' incident was every signal
    derived from one absolute score against one anchor. The embedding's
-   resolution floor still exists — homophones and single-schwa-edit pairs
-   are excluded as unseparable by construction — and the phone view keeps
+   resolution floor still exists - homophones and single-schwa-edit pairs
+   are excluded as unseparable by construction - and the phone view keeps
    independent value there only in principle, since the same pair also sat
    at its resolution floor (0.80 vs tau 0.81).
 
 ## Artifact map (post-cleanup, 2026-07-02)
 
-- `logs/detections_<kw>.json` — latest run on the **current** (Set D) chunk
+- `logs/detections_<kw>.json` - latest run on the **current** (Set D) chunk
   set only: russia, weather, scotland, ireland. administration/washington
   were built against the now-retired Set C and moved to `logs/archive/`.
-- `logs/archive/` — dated historical runs on retired chunk sets
+- `logs/archive/` - dated historical runs on retired chunk sets
   (`*_oldchunks`); duplicate per-run `timestamps_*.txt` files were deleted
   where the JSON holds the same detections (absolutely, heat, elon,
   administration). The penalty timestamps file was kept because it is the only
   record of the 2026-07-02 TTS-baseline rerun.
-- `keywords/<kw>_anchor.npz` / `<kw>_anchor_tts.npz` — kNN-VC vs baseline
+- `keywords/<kw>_anchor.npz` / `<kw>_anchor_tts.npz` - kNN-VC vs baseline
   anchors; `<kw>_calibration.json`, `cohort_<kw>.npz` alongside.
-- `keywords/<kw>_variants/` vs `<kw>_variants_knnvc/` — TTS clips before/after
+- `keywords/<kw>_variants/` vs `<kw>_variants_knnvc/` - TTS clips before/after
   voice conversion (kept: side-by-side audio demo material; the penalty
   knnvc set is irreproducible since chunk set B was deleted).
-- `checkpoints/` — Phase 1 baseline + both Phase 2 GRL runs.
-- `videos/` — current chunk set's video sources (demo material for showing
+- `checkpoints/` - Phase 1 baseline + both Phase 2 GRL runs.
+- `videos/` - current chunk set's video sources (demo material for showing
   detections in context).

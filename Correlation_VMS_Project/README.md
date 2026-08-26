@@ -1,4 +1,12 @@
-# Video Context Extraction
+# Video Context Extraction - NESCOM Correlation VMS (baseline)
+
+> **Role:** this is the **deployed NESCOM-NUST predecessor system** and the journal
+> paper's continuity baseline - not the current detector. Its waveform-correlation
+> core was re-evaluated on our live-broadcast chunk sets and scores **micro-F1 0.087**
+> at its shipped 70% threshold (0.258 with an oracle global threshold), versus
+> **1.000** for the current Siamese detector. Kept as a runnable comparison target
+> (`Journal_Paper/experiments/corr_baseline.py`). The current system lives in
+> `Siamese_VMS_Project/`.
 
 A comprehensive video stream analysis system that detects specific keywords in live video streams using synthesized speech and audio correlation detection. The project supports multiple parallel streams, integrates with YouTube Live streaming, and provides a GUI for easy monitoring and control.
 

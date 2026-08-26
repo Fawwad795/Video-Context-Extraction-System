@@ -3,7 +3,7 @@
 ## What This Project Does
 
 Give the system a **word** and a **live video/audio stream**, and it tells
-you when that word gets spoken — without running full speech-to-text on the
+you when that word gets spoken - without running full speech-to-text on the
 live feed, and without any recording of that word in that exact voice.
 
 You type a keyword like `"cloudy"`. The system:
@@ -13,7 +13,7 @@ You type a keyword like `"cloudy"`. The system:
    embedding with Adaptive S-norm (AS-norm).
 3. **Flags** windows whose score crosses a per-keyword calibrated threshold.
 
-The result: zero-shot keyword spotting on live news audio — no enrollment
+The result: zero-shot keyword spotting on live news audio - no enrollment
 recording, no live ASR pass, no retraining per stream.
 
 For a GUI that monitors a YouTube URL in real time, see
@@ -27,18 +27,18 @@ pip install -r requirements.txt
 ```
 
 Python 3.11 validated (see `requirements.txt` for exact package versions).
-`moviepy` pulls in `imageio-ffmpeg`, which bundles its own ffmpeg binary —
+`moviepy` pulls in `imageio-ffmpeg`, which bundles its own ffmpeg binary -
 no separate system ffmpeg install needed.
 
 **Model checkpoints are already in this repo** (`checkpoints/*.pth`, a few
-MB each) — the pipeline runs immediately with no training step. The
+MB each) - the pipeline runs immediately with no training step. The
 "Model Training" section further down documents how they were produced,
 not something you need to redo.
 
 **First run needs internet access**, even with every package installed:
 `core/scoring.py` defaults `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` /
 `HF_DATASETS_OFFLINE=1` for every run, so that a flaky connection can't
-break a load of an already-cached model — but on a machine with nothing
+break a load of an already-cached model - but on a machine with nothing
 cached yet, that same default makes the *first* run fail outright trying
 to reach Hugging Face while offline. Do the first pipeline command with
 those disabled, then leave them on afterward:
@@ -55,7 +55,7 @@ This downloads SpeechT5 (TTS + HiFi-GAN), the CMU ARCTIC x-vectors dataset,
 and WavLM into the local cache (~1-2 GB total); every run after that can
 go back to the offline default.
 
-**No audio is bundled in this repo** — `audios/Chunkset_D|E|F/transcripts.txt`
+**No audio is bundled in this repo** - `audios/Chunkset_D|E|F/transcripts.txt`
 are kept as historical ground truth for the results below, but the
 matching `.wav` chunks are not (large binary, and a live stream's content
 isn't reproducible on demand anyway). Run `pipeline/downloader.py` to
@@ -65,7 +65,7 @@ pull your own chunks before anything else in the Usage Guide below.
 
 Raw TTS compared directly to human speech mostly fails: a synthetic voice and
 a real voice land in different regions of embedding space even when saying
-the same word. We call this the **synthetic-to-real domain gap** — it was
+the same word. We call this the **synthetic-to-real domain gap** - it was
 the single biggest early failure mode (F1 = 0.00 on conversational speech
 with a raw TTS anchor; see
 [reports/EXPERIMENT_LOG.md](reports/EXPERIMENT_LOG.md)).
@@ -73,9 +73,9 @@ with a raw TTS anchor; see
 The fix: a **trained detector head** (attentive pooling on frozen WavLM
 layer-10 features, trained with phonetic-confusable batches) closes the gap
 in embedding space, so true keyword windows cross the calibrated threshold
-directly — no voice conversion of the anchor and no third verification stage.
+directly - no voice conversion of the anchor and no third verification stage.
 (Earlier versions of this pipeline closed the gap with kNN-VC voice
-conversion instead; ablations showed the trained head makes it redundant —
+conversion instead; ablations showed the trained head makes it redundant -
 see the note at the end of "Does It Actually Work?".)
 
 ## How It Works: The Two-Stage Pipeline
@@ -86,14 +86,14 @@ flowchart TD
     STREAM(["Live stream audio"])
     RESULT(["Detections<br/><b>+ timestamps</b>"])
 
-    subgraph S1["STAGE 1 — Anchor Building"]
+    subgraph S1["STAGE 1 - Anchor Building"]
         direction TB
         TTS["7 TTS voices<br/>SpeechT5 + HiFi-GAN"]
         CENTROID["L2-normalized centroid"]
         TTS --> CENTROID
     end
 
-    subgraph S2["STAGE 2 — Detection"]
+    subgraph S2["STAGE 2 - Detection"]
         direction TB
         SLIDE["Multi-scale windows<br/>0.6× / 0.8× / 1.0×, 50 ms hop"]
         EMBED["WavLM L10 frames<br/>+ attentive pooling head"]
@@ -141,7 +141,7 @@ fit on keyword-free stream audio.
 - **Backbone:** frozen `microsoft/wavlm-base-plus`, **layer 10** frame features
   (word identity peaks in mid layers, not the last layer).
 - **Head:** trained attentive pooling + projection
-  (`core/embedders.py`, `training/train_siamese_v3.py`) — sub-center ArcFace
+  (`core/embedders.py`, `training/train_siamese_v3.py`) - sub-center ArcFace
   over MSWC + TTS bank with phonetic-confusable batches.
 - **Scoring:** cosine similarity → **Adaptive S-norm** against a per-keyword
   cohort (`pipeline/cohort_builder.py`):
@@ -150,21 +150,21 @@ $$
 s_{\text{norm}} = \frac{1}{2}\left(\frac{s - \mu_a}{\sigma_a} + \frac{s - \mu_w}{\sigma_w}\right)
 $$
 
-- **Detector:** `pipeline/detector.py` — multi-scale windows, 50 ms hop
+- **Detector:** `pipeline/detector.py` - multi-scale windows, 50 ms hop
   (must match calibration). Frame backends embed each chunk with one forward
   pass and pool windows from contextualized frames (~100× faster than
   per-window embedding).
-- **Threshold:** `pipeline/calibrate.py` — max score on keyword-free windows
+- **Threshold:** `pipeline/calibrate.py` - max score on keyword-free windows
   embedded through the **same detector protocol** (chunk context, all scales,
   50 ms grid), plus a gap-based safety margin (`--safety-margin`, default
   0.2) toward the positive centre. Defaults to `--fa-percentile 100
   --negatives 40000` (the trained-head operating point); negatives are drawn
   only from chunks that do not contain the keyword (transcript token check,
   word-family aware). The live platform (no pre-existing transcript)
-  produces one itself — see
+  produces one itself - see
   [`platform/README.md`](platform/README.md#calibration-leakage-guard).
 - **Rival-anchor verification (RAV):** `pipeline/verify_detections.py` /
-  `core/rival_verify.py` — detections are re-checked against the keyword's
+  `core/rival_verify.py` - detections are re-checked against the keyword's
   own *synthesized impostors* before being accepted. At enrollment the
   system derives the keyword's confusable words two ways (phone-lexicon
   edit distance + embedding-proximity ranking over a global TTS word bank,
@@ -177,7 +177,7 @@ $$
   full-word-scale window around it beats every armed rival by the
   calibrated AS-norm margin. This separates the phonetic confusables the
   absolute threshold cannot ("policy"/"public" firing for *party* at
-  scores above real hits) with zero extra models — a handful of dot
+  scores above real hits) with zero extra models - a handful of dot
   products per detection. Artifacts: `keywords/<kw>_rivals*.npz`,
   `keywords/<kw>_rivals/`. The retired phone-CTC stage is preserved on the
   `archive/phone-verifier` branch.
@@ -210,14 +210,14 @@ Full history, ablations, and failure analyses:
 
 Pipeline parameter defaults (voice count, holdout, stream-window count, TTS
 distractors) come from a one-at-a-time ablation over the same Set D keywords:
-`ablation_study/` — the `combined_best` config cuts wall time ~70% vs. the
+`ablation_study/` - the `combined_best` config cuts wall time ~70% vs. the
 original search-time defaults with no F1 loss (`ablation_study/results/`).
 
 **Retired: kNN-VC anchor conversion.** Earlier pipeline versions re-voiced
 the TTS anchor into the stream's own voice with
 [kNN-VC](https://github.com/bshall/knn-vc) to close the domain gap. With the
 trained v3 head, ablations found no F1 benefit on 9/9 keywords across two
-chunk sets — including `administration` vs. its near-homophone
+chunk sets - including `administration` vs. its near-homophone
 `immigration`, the confusable case voice conversion existed to protect
 (`ablation_study/results/knnvc_ablation.jsonl`). The kNN-VC stage was
 removed; the full implementation is preserved on the
@@ -312,7 +312,7 @@ $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
    ```bash
    python pipeline/transcribe_chunks.py
    ```
-3. **TTS prototype anchor** (7 canonical voices, holdout 4 — defaults tuned by
+3. **TTS prototype anchor** (7 canonical voices, holdout 4 - defaults tuned by
    `ablation_study/`, no accuracy loss vs. the original 17-voice search):
    ```bash
    python pipeline/keyword_generator.py --keyword cloudy
@@ -346,4 +346,4 @@ $env:SIAMESE_V3_WEIGHTS = "checkpoints/siamese_v3_best.pth"
 |---|---|
 | `Correlation_VMS_Project/` | Original TTS + cross-correlation baseline |
 | `PhonMatchNet_VMS_Project/` | G2P open-vocabulary phoneme matching (no audio anchor) |
-| **Siamese_VMS_Project/** | This project — Siamese embedding + trained WavLM detector |
+| **Siamese_VMS_Project/** | This project - Siamese embedding + trained WavLM detector |
