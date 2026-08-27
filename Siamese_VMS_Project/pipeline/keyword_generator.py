@@ -20,6 +20,7 @@ Output: keywords/<keyword>_anchor.npz
 """
 
 import argparse
+import hashlib
 import os
 import time
 
@@ -71,8 +72,33 @@ def load_tts():
     return processor, tts_model, vocoder, xvectors
 
 
+TTS_SEED = 42          # base seed for synthesis determinism (see _synthesis_seed)
+
+
+def _synthesis_seed(text, xvector, base=TTS_SEED):
+    """Deterministic seed for one (text, voice) synthesis.
+
+    SpeechT5 applies speech-decoder-prenet dropout *at inference by design*
+    (Tacotron 2 §2.2; see `SpeechT5SpeechDecoderPrenet._consistent_dropout`,
+    which calls `torch.bernoulli` directly, so `model.eval()` does not disable
+    it). It therefore draws on torch's global RNG, and without seeding every
+    render differs run to run - which propagated into the anchor waveform, the
+    trim boundary, `window_samples`, the centroid, and the embedding-ranked
+    rival selection. Seeding per (text, voice) rather than once per process
+    keeps each clip reproducible no matter how many clips precede it, so
+    changing --n-augment or the voice list cannot shift earlier results.
+    """
+    h = hashlib.sha256()
+    h.update(str(base).encode())
+    h.update(text.encode("utf-8"))
+    vec = xvector.detach().cpu().numpy() if torch.is_tensor(xvector) else xvector
+    h.update(np.ascontiguousarray(vec, dtype=np.float32).tobytes())
+    return int.from_bytes(h.digest()[:8], "big") % (2 ** 31 - 1)
+
+
 def synthesize(processor, tts_model, vocoder, text, xvector):
     inputs = processor(text=text, return_tensors="pt")
+    torch.manual_seed(_synthesis_seed(text, xvector))
     with torch.no_grad():
         speech = tts_model.generate_speech(
             inputs["input_ids"], xvector.unsqueeze(0), vocoder=vocoder)

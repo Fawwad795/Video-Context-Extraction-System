@@ -569,3 +569,160 @@ One-time artifacts: global bank ~2 h CPU per backend; per-keyword rivals
 - `checkpoints/` - Phase 1 baseline + both Phase 2 GRL runs.
 - `videos/` - current chunk set's video sources (demo material for showing
   detections in context).
+
+## Prong 2 / LibriPhrase pre-flight verification (2026-08-26/27)
+
+Preparation for scoring the cascade against PhonMatchNet's **published**
+LibriPhrase numbers (LP-E 2.80 / 99.29, LP-H 18.82 / 88.52), taken as ground
+truth - we never run their model. Because their side is never re-run, a protocol
+mismatch could not be absorbed after the fact, so every checkable assumption was
+checked first. Ten checks; each passed, was made moot, or produced a finding.
+
+### Documentation that did not survive checking
+
+1. **No LibriPhrase EER harness ever existed in this repo.** The vendored
+   `PhonMatchNet_VMS_Project/phonmatchnet/` is an inference-only subset (`model/`,
+   `dataset/g2p/`, `google_speech_embedding/`); no `train.py`, `dataset/libriphrase.py`
+   or `criterion/`, and absent from every commit in `git log --all` for that path.
+   Consequently **LP-E 6.97 / LP-H 28.39 has no backing artifact** - it appears only
+   in prose (that project's `README.md:61-63`, `APPROACH_COMPARISON.md`,
+   `EXPERIMENTAL_PLAN.md:44` and `:224`) and this ledger had no PhonMatchNet entry
+   at all. It was produced on the rented AWS host in June 2026; only the two
+   checkpoints came back. `EXPERIMENTAL_PLAN.md` is wrong where it claims a working
+   harness, and the B4 cost estimate resting on that claim was optimistic.
+   Upstream has no `test.py` either - evaluation lives inside `train.py`.
+2. **The 2026-08-19 meeting note's CED row is wrong**, and marked *verified*. It
+   lists LP-E 1.7 / 99.84 and LP-H 14.4 / 92.7; those four numbers appear nowhere
+   in P1. P1's Table 2 ("(II) Proposed") reports **8.42 / 96.70** and
+   **32.90 / 73.58**. P2's own re-implementation of CED lands at 10.48 / 95.63 and
+   29.34 / 77.60, corroborating 8-10 / 29-33 rather than 1.7 / 14.4.
+3. **The LibriPhrase repo ships no `data/` directory** - only `libriphrase.py`,
+   `utils.py`, `README.md`, `requirements.txt`. An earlier claim that it ships the
+   word alignments (so no forced aligner is needed) was false. Moot in the end, see 4.
+
+### The dataset
+
+4. **The complete eval set is public and pre-built**: `charsiu/libriphrase` on
+   HuggingFace carries the four `libriphrase_diffspk_all_Nword.csv` files (the exact
+   glob PhonMatchNet's loader expects) plus `LibriPhrase_evalset.zip`.
+   **136,461 wav files; 136,461 unique CSV-referenced paths; 100.0% resolution in
+   both directions.** Every path sits under `train-other-500/`. Unique anchor clips
+   divided by 3 gives **4,391 / 2,605 / 467 / 56** for 1/2/3/4 words - P1's published
+   episode counts, exactly, for all four lengths, at 27 rows per episode. The data
+   also settles the `--maxspk` ambiguity (1166 in the script's defaults vs 1611 in
+   its README): **1,166 unique speakers**. This removed the ~30 GB LibriSpeech
+   download, the MFA pass, the FLAC conversion, *and* the unseeded-generator
+   reproducibility problem - we inherit the same file everyone else uses.
+   Durations are 0.50-2.00 s, **median 0.61 s**; 0.4% of rows share a speaker, so
+   "diffspk" is near-universal rather than strict.
+5. **One CSV row expands into four scored samples** (verified verbatim in upstream
+   `dataset/libriphrase.py`): each clip is paired with its **own** transcript
+   (label 1) and with the other clip's transcript (label from `target`). All four
+   inherit the row's `type` via `anc_pos['type'] = df['type']`, which is why
+   filtering `type == diffspk_easyneg` still yields both classes. The
+   `diffspk_positive` rows are used only in `both` mode, not for LP-E/LP-H. Scoring
+   only the anchor-keyed pairs would leave almost no positives and make EER
+   meaningless.
+6. **Their EER is batch-averaged, not pooled.** `criterion/utils.py` defines a Keras
+   metric that does `score += compute_eer(batch); count += 1; result = score/count`,
+   and the eval loop calls it per batch with `GLOBAL_BATCH_SIZE = 2048 *
+   num_replicas` and `shuffle=True`. **AUC** uses `tf.keras.metrics.AUC` and *is*
+   pooled. So 2.80 / 18.82 are means of ~132 per-batch EERs. `compute_eer` itself is
+   `sklearn.metrics.roc_curve` then the mean of fpr and fnr at `argmin|fnr - fpr|`.
+
+### Our side
+
+7. **Whole-clip scoring is required, and is also better.** On 840 short clips
+   (keyword TTS variants vs their own rivals, 0.32-1.22 s), the multi-scale sliding
+   detector gave **no score at all** to 8 clips - the `pool_windows` -> `n_windows == 0`
+   path at `detector.py:132-153`. Whole-clip scored every clip and did better
+   overall: pooled **AUC 95.72 / EER 10.04%** vs sliding 95.41 / 11.33%. The
+   per-keyword pattern is consistent - the longer the anchor window relative to the
+   clip, the more sliding hurts (`administration`, 1.12 s window: 14.1% -> 2.4%;
+   `weather`/`party` at 0.51 s: unchanged). Caveat: positives are the keyword's own
+   TTS variants, so absolute separation is optimistic and TTS-vs-TTS never crosses
+   the synthetic-to-real gap. This was a mechanics test, not a prediction.
+8. **The RAV margin alone is the wrong score function for a threshold-free metric.**
+   The margin is continuous and well-behaved (90.9% exact-distinct values, median
+   consecutive gap 1.7e-4, 0.005% mass at the extremes) but as a *standalone* score
+   it degrades a perfect detector: on Sets D/F the detector scores AUC 100.00 / EER
+   0.00% while the bare margin gives 97.31 / 2.78%. `outbreaks` shows the mechanism:
+   live_2 ("prolonged outbreaks") scores 4.99 but its rival *outcomes* also fires at
+   2.49, so the **difference** collapses to -0.06 - below keyword-free chunks whose
+   scores are all low and whose difference is therefore small but positive. The
+   margin discards the absolute score, which was doing the discriminating. This is
+   coherent with RAV's design: it is a gate applied only to windows that already
+   cleared the threshold, where a high absolute score is guaranteed. The faithful
+   continuous form is
+   **`s_cascade = s_det - lambda * max(0, delta - margin)`** - it can only demote,
+   is monotone in both inputs, and reduces to the gate at a threshold. It held
+   AUC 100.00 / EER 0.00% at lambda in {0.5, 1.0, 2.0}. Lambda is unidentifiable on
+   broadcast data (the penalty never binds when the detector is already perfect) and
+   must be set on LP-Hard.
+9. **Rival arming is healthy; `delta = 0.0` is not a bug.** Across 15 keywords all
+   armed 11-16 rivals (median 15), none zero, and the worst-positive-minus-best-rival
+   gap was always positive (+0.743 to +7.771, median +2.551). `delta = 0` for 14 of
+   15 is `DELTA_FLOOR` clamping a negative computed bar: since `rival_margin_max` is
+   negative everywhere, `rival_max + 0.2*(pos_p10 - rival_max)` goes negative.
+   `america` is the exception at +0.839, which reproduces its stored value exactly.
+   Multi-word anchors were a suspected zero-rival risk; **"she said" armed 16**, so
+   the risk did not materialise, though a defensive fallback is still warranted
+   because `margins()` raises on an empty rival set.
+10. **The whole cost is SpeechT5 synthesis.** Measured marginal cost per keyword
+    (models resident): `keyword_generator` ~0-12 s, `cohort_builder` **9.8 s**,
+    `rival_builder` **148.1 s** - 94% of the total 157.5 s, and real work
+    (16 rivals x 7 voices = **112 TTS renders**, ~1.3 s each on CPU). Cohort
+    duration-bucketing saves 6%, not "about half" as first estimated. Scoring is
+    negligible: 197.2 ms per unique clip (WavLM forward), 0.99 ms per sample
+    (AS-norm), 15.73 ms per sample (`margins()` with 16 rivals) - **1.39 CPU-hours
+    for the whole run, 1% of enrollment**. The forward is per *clip*, not per sample
+    (16,101 clips carry 47,006 samples), so embeddings cache. LP-Hard needs only
+    **1,969** unique keywords against LP-Easy's 7,643, because hard negatives are
+    drawn from a narrow phonetic neighbourhood and repeat.
+
+### The finding that changed the code
+
+11. **The pipeline was non-deterministic, and had been for every keyword ever
+    built.** Two from-scratch builds of the same keyword agreed on `keyword`,
+    `delta`, `n_stream`, `n_tts` and disagreed on **everything derived from audio** -
+    `centroid`, `positives`, `window_samples`, cohort `embeddings`, rival `centroids`,
+    all four margin stats, and the rival `words` list itself. Root cause: SpeechT5
+    applies speech-decoder-prenet dropout at inference **by design** (Tacotron 2
+    convention; `SpeechT5SpeechDecoderPrenet._consistent_dropout` calls
+    `torch.bernoulli` directly, so `model.eval()` does not disable it and a
+    module-level scan shows `training=False`), consuming torch's global RNG - which
+    `keyword_generator.py` never seeded, having seeded only NumPy (42/43, plus
+    cohort 123 and calibration 777). Isolated confirmation: unseeded renders of the
+    same word and x-vector differed by max 3.9e-01; with `torch.manual_seed` they
+    were bit-identical. **Fix:** `synthesize()` now seeds torch from a SHA-256 hash
+    of `(text, x-vector, TTS_SEED)` immediately before generating - per call rather
+    than per process, so clip *N* does not depend on how many clips preceded it and
+    changing `--n-augment` or the voice list cannot shift earlier results. Both
+    entry points are covered because `rival_builder` imports the same function.
+    Re-run verdict: **all 15 arrays identical**, including `window_samples` and
+    `words`. The invariant in CLAUDE.md now actually holds. Pre-existing artifacts
+    are unaffected because clips are cached, so the **19 keywords on disk (including
+    all 16 behind the Set D/E/F results) remain irreproducible until rebuilt** - a
+    pending isolated rebuild will establish whether micro-F1 1.000 / 0.982 survives,
+    and a change there is a finding, not a repair.
+
+### Decisions taken
+
+- **Scope**: exact PhonMatchNet protocol, **500 anchor classes, seed 777** -
+  47,006 samples / 9,030 keywords / 16,101 clips; LP-Hard subset 20,564 / 1,969 /
+  7,325. Full evaluation (51,020 keywords) is ~6.6x and deferred, because the
+  determinism fix, lambda, and the cohort source all had to be settled first.
+- **Compute**: Modal free tier ($30/month, 100 CPU containers, GPU concurrency 10).
+  Enrollment on CPU containers; the job is embarrassingly parallel per keyword.
+- **C4 cohort constants**: source decided by A/B on **40 anchor classes disjoint
+  from the 500** (deciding on the reported data would be test-set selection - the
+  very thing P2 does at its section 4.2); cohort size **50** and `top_k` **50**
+  unchanged, since cohort > 50 would activate adaptive selection and change the
+  system; **per-keyword** cohorts; **stem-family** exclusion for cohort hygiene
+  while labels come from their `target` (two independent uses); TTS distractors off.
+- `fit_whitener`/`whiten` in `core/scoring.py` are defined but never called, so the
+  cohort affects only AS-norm's mean/std.
+- Harness: `benchmarks/libriphrase/` (tracked - it produces a paper number);
+  outputs to `Journal_Paper/experiments/`; data outside the repo. No second copy of
+  the pipeline, and no change to `detector.py` - the scorer calls
+  `scoring.asnorm_windows` and `rival_verify.margins` directly.
