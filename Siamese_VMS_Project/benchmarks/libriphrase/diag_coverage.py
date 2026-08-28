@@ -54,8 +54,10 @@ def diagnose(split: str = "sel"):
            "missing_clips": len(missing_clips), "arms": {}}
 
     # 1 + 3. per-arm artifact coverage and resulting row loss
-    for arm, root in (("devclean", f"{RUN_ROOT}_sel_devclean"),
-                      ("broadcast", f"{RUN_ROOT}_sel_broadcast")):
+    roots = ([("run", RUN_ROOT)] if split == "500"
+             else [("devclean", f"{RUN_ROOT}_sel_devclean"),
+                   ("broadcast", f"{RUN_ROOT}_sel_broadcast")])
+    for arm, root in roots:
         miss_kw = [k for k in kws
                    if not (os.path.exists(f"{root}/keywords/{k}_anchor{suf}.npz")
                            and os.path.exists(f"{root}/keywords/cohort_{k}{suf}.npz"))]

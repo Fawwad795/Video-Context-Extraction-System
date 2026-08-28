@@ -446,6 +446,43 @@ def purge(keywords: list, root: str = RUN_ROOT):
     return {"keywords": len(keywords), "paths_removed": removed, "root": root}
 
 
+@app.function(image=image, volumes={"/data": data}, timeout=7200)
+def cleanup_clips(root: str = RUN_ROOT, dry_run: bool = True):
+    """Delete intermediate TTS clip directories, keeping every .npz artifact.
+
+    keyword_generator caches 12 variant wavs per keyword and rival_builder ~112
+    rival wavs per keyword, all under SIAMESE_PROJECT_ROOT - i.e. on the Volume.
+    At this scale that is ~108k + ~220k files, and Modal Volumes cap at 500k
+    INODES, not bytes: the run hit 99.6% (498,102/500,000) and further file
+    creation would have started failing.
+
+    The clips are pure intermediates - the anchor npz holds the centroid and
+    positives, the rivals npz holds the centroids and delta - so scoring needs
+    none of them. Removing them does mean a later re-run re-synthesises rather
+    than reusing the cache, which is the correct trade at this scale.
+    """
+    import glob
+    import shutil
+
+    kdir = f"{root}/keywords"
+    dirs = [d for d in glob.glob(f"{kdir}/*_variants") + glob.glob(f"{kdir}/*_rivals")
+            if os.path.isdir(d)]
+    n_files = 0
+    for d in dirs:
+        n_files += sum(len(f) for _, _, f in os.walk(d))
+    if dry_run:
+        return {"dry_run": True, "dirs": len(dirs), "files": n_files,
+                "sample": [os.path.basename(d) for d in dirs[:5]]}
+    removed = 0
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)
+        removed += 1
+    data.commit()
+    npz = len(glob.glob(f"{kdir}/*.npz"))
+    return {"dry_run": False, "dirs_removed": removed, "files_freed": n_files,
+            "npz_artifacts_kept": npz}
+
+
 @app.function(image=image, volumes={"/data": data}, timeout=600)
 def write_results(name: str, rows: list):
     os.makedirs(f"{RUN_ROOT}/results", exist_ok=True)
@@ -567,6 +604,42 @@ def voicefix_test(cohort: str = "devclean"):
               f"(~41s under 7)")
     print("VERDICT:", "voice budget fix works" if not bad
           else f"{len(bad)} keywords need a different remedy")
+
+
+@app.function(image=image, volumes={"/data": data}, timeout=900)
+def selection_hard_keywords():
+    """LP-Hard keywords of the 40-class holdout - the set lambda is chosen on."""
+    import pandas as pd
+    df = pd.read_csv(f"{MANIFEST}/samples_selection40.csv")
+    hard = df[df["type"] == "diffspk_hardneg"]
+    return sorted(set(hard["text"].astype(str).str.lower()))
+
+
+@app.local_entrypoint()
+def lambda_select(cohort: str = "devclean"):
+    """Enroll rivals for the holdout's LP-Hard keywords so lambda can be chosen
+    OFF the reported set.
+
+    Reading lambda off the 500 would be selection on the test set - the same
+    fault we note in PhonMatchNet's section 4.2 ("the best model was selected
+    based on performance on the test sets"). The 40 anchor classes here are
+    disjoint from the reported 500 by construction (make_manifests draws them
+    from the remainder and asserts disjointness).
+
+    Artifacts go into RUN_ROOT: keywords shared with the 500 already exist and
+    are skipped, and per-keyword artifacts are deterministic, so reuse is exact
+    rather than approximate.
+    """
+    kws = selection_hard_keywords.remote()
+    print(f"holdout LP-Hard keywords: {len(kws):,}")
+    _drive("lambda_select", [{"keyword": k, "cohort": cohort, "need_rivals": True}
+                             for k in kws])
+
+
+@app.local_entrypoint()
+def cleanup(root: str = "", apply: bool = False):
+    """Free Volume inodes by deleting intermediate clip dirs. Dry run by default."""
+    print(cleanup_clips.remote(root or RUN_ROOT, dry_run=not apply))
 
 
 @app.local_entrypoint()
