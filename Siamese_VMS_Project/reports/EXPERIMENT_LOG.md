@@ -596,6 +596,10 @@ checked first. Ten checks; each passed, was made moot, or produced a finding.
    in P1. P1's Table 2 ("(II) Proposed") reports **8.42 / 96.70** and
    **32.90 / 73.58**. P2's own re-implementation of CED lands at 10.48 / 95.63 and
    29.34 / 77.60, corroborating 8-10 / 29-33 rather than 1.7 / 14.4.
+   **[Pointer added 2026-09-02, original text above left intact: this entry is
+   RETRACTED. 1.7 / 14.4 are the real published numbers of CED (Nishu et al.,
+   ICASSP 2024), a different system from P1 (= CMCD). See the 2026-09-02 entry at
+   the end of this file.]**
 3. **The LibriPhrase repo ships no `data/` directory** - only `libriphrase.py`,
    `utils.py`, `README.md`, `requirements.txt`. An earlier claim that it ships the
    word alignments (so no forced aligner is needed) was false. Moot in the end, see 4.
@@ -726,3 +730,85 @@ checked first. Ten checks; each passed, was made moot, or produced a finding.
   outputs to `Journal_Paper/experiments/`; data outside the repo. No second copy of
   the pipeline, and no change to `detector.py` - the scorer calls
   `scoring.asnorm_windows` and `rival_verify.margins` directly.
+
+## Prong 1 pre-flight: the CED / CMCD conflation (2026-09-02)
+
+Desk verification only - no detection run, no new scoring. Preparation for scoring the
+cascade against the paper that **created** LibriPhrase. Appended rather than edited into
+the 2026-08-26/27 section, because one entry there is being retracted and the history
+should show both states.
+
+### Retraction
+
+**Entry 2 of the 2026-08-26/27 section is wrong and is retracted.** It states that the
+2026-08-19 meeting note's "CED row" (LP-E 1.7 / 99.84, LP-H 14.4 / 92.7) is wrong because
+"those four numbers appear nowhere in P1". The numbers are real. They are the published
+results of a **different system that is also called CED**, and the 2026-08-19 note's actual
+error was attaching them to P1's arXiv id. Everything else in that entry stands: P1's own
+Table 2 does report 8.42 / 96.70 and 32.90 / 73.58, and P2's re-implementation does land at
+10.48 / 95.63 and 29.34 / 77.60. Those figures belong to **CMCD**, not CED.
+
+### The two systems, both verified from their own results tables
+
+| | CMCD | CED |
+|---|---|---|
+| Full name | cross-modal correspondence detector | not expanded in its own paper |
+| Authors | Shin, Han, Kim, Chung, Kang (Yonsei / Naver) | Nishu, Cho, Dixon, Naik (Apple) |
+| Venue | Interspeech 2022, pp. 1871-1875, DOI 10.21437/Interspeech.2022-580 | ICASSP 2024, pp. 5050-5054, IEEE Xplore 10447547 |
+| arXiv | 2206.15400 | 2308.06472 |
+| Params | 0.7M | **3.8M** (its own section 3.2; ProKWS and DMA-KWS both misprint 3.6M) |
+| LP-E EER / AUC | 8.42 / 96.70 | 1.70 / 99.84 |
+| LP-H EER / AUC | 32.90 / 73.58 | 14.40 / 92.70 |
+| Introduced LibriPhrase | yes | no |
+
+CMCD's 8.42 / 32.90 is quoted identically by ProKWS, MALEFA and DMA-KWS - three independent
+corroborations. CED's LP-H 14.4 / 92.7 is confirmed in its own abstract ("increasing AUC
+from 84.21% to 92.7% and reducing EER from 23.36% to 14.4%").
+
+### What the desk pass established
+
+11. **Neither system ever released model code.** CMCD's repository
+    (`gusrud1103/LibriPhrase`) is the dataset recipe only; issue #1 asking for the
+    implementation has been open and unanswered since 2023-03-08. CED's paper names no
+    repository. **Consequence: pooled-vs-batch-averaged EER is unknowable for both.** Only
+    P2's is verifiable (batch-averaged, `criterion/utils.py`), which is what our harness
+    matched. Our own two forms differ by ~0.04 EER, far below any gap in the table.
+12. **The LibriPhrase protocol is publicly contested.** Repository issue #7, opened
+    2026-08-05 and unanswered: PhonMatchNet expands **4 trials per CSV row**, DMA-KWS and
+    MM-KWS expand **2**, and 40-61% of the resulting trials are duplicate
+    (keyword, clip) pairs depending on protocol, with no paper stating whether it
+    deduplicated. Affects our already-reported row and P4's prong.
+13. **CMCD's episode expansion is reconstructable from the scores already on disk, at zero
+    compute.** CMCD describes each episode as 3 positive plus 3 negative pairs. Restricting
+    `500_cas_*.csv` to the comparison-clip side (`src` in `com_pos`, `com_neg`) gives
+    LP-Easy **8,800 / 8,833** and LP-Hard **4,379 / 4,401** - 49.9/50.1 in both, exactly
+    the balance that description predicts. The anchor-keyed side is **not** usable alone:
+    it is an identical 2,946 / 8,838 for both difficulties, because an anchor's own
+    positives do not depend on which negative it was paired with, so an anchor-only score
+    cannot separate LP-Easy from LP-Hard at all.
+14. **The per-word-length breakdown (CMCD's Figure 5) is also free.** Counts over the same
+    49,981 rows, positives in brackets: LP-Easy 1w 18,827 (7,510), 2w 8,340 (3,336), 3w
+    2,190 (876), 4w 60 (24); LP-Hard 1w 13,424 (4,816), 2w 5,626 (1,977), 3w 1,468 (515),
+    4w 46 (17). The 4-word bucket is too small for a stable EER and will be reported
+    without conclusion; CMCD had the same problem with 56 four-word episodes of 7,519.
+15. **CED's confusable-keyword module is close prior art for RAV**, and its ablation moves
+    the same way ours does. CED Table 1: confusables cost **0.90** EER on LP-Easy
+    (0.80 -> 1.70) and buy **4.00** on LP-Hard (18.40 -> 14.40). Ours: cost **0.35**
+    (2.08 -> 2.43), buy **1.94** (25.85 -> 23.91). Two unconnected groups, same public
+    data, same direction. This is simultaneously strong external support for RAV's premise
+    and a constraint on the novelty claim: theirs is training-time and baked into weights,
+    ours is decision-time, synthesised per keyword, with no retraining.
+
+### Decisions taken
+
+- **Rename to CMCD** wherever Shin et al. is meant. Applied to `paper/paper_skeleton.tex`
+  (live file only; dated checkpoints left as historical snapshots), `EXPERIMENTAL_PLAN.md`,
+  and the meeting notes, which carry correction banners rather than rewrites.
+- **Prong order: CMCD first, then CED as a separate follow-on prong.** CED is a valid
+  published baseline that beats us on both halves, but it is a second piece of work.
+- **Scope of the CMCD prong: zero new compute.** Every planned output is arithmetic over
+  `Journal_Paper/experiments/libriphrase/scores/`. Plan and cost:
+  `Journal_Paper/meeting_notes_work/2026-09-02-cmcd-comparison.md`.
+- **Pre-committed:** the same 500 classes at seed 777, and lambda stays at 4. No
+  re-selection of lambda under the new expansions, even if a different value scores better
+  on the reported set.
