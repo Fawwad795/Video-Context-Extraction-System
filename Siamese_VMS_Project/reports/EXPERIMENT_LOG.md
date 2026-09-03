@@ -705,10 +705,28 @@ checked first. Ten checks; each passed, was made moot, or produced a finding.
     entry points are covered because `rival_builder` imports the same function.
     Re-run verdict: **all 15 arrays identical**, including `window_samples` and
     `words`. The invariant in CLAUDE.md now actually holds. Pre-existing artifacts
-    are unaffected because clips are cached, so the **19 keywords on disk (including
-    all 16 behind the Set D/E/F results) remain irreproducible until rebuilt** - a
-    pending isolated rebuild will establish whether micro-F1 1.000 / 0.982 survives,
-    and a change there is a finding, not a repair.
+    are unaffected because clips are cached, so the **16 keyword builds in
+    `Siamese_VMS_Project/keywords/` (including all 14 behind the Set D/E/F results)
+    remain irreproducible until rebuilt** - a pending isolated rebuild will establish
+    whether micro-F1 1.000 / 0.982 survives, and a change there is a finding, not a
+    repair.
+
+    *Counts corrected 2026-09-04 (this line originally read "19 keywords on disk
+    (including all 16 behind the Set D/E/F results)"; edited in place at the
+    researcher's instruction rather than appended).* Audited against disk: the store
+    holds **16** anchors, of which **14** have a calibration file and a
+    `detections_<kw>.json`/`_unverified.json` pair, matching the 14-pair `EVAL` list
+    in `Journal_Paper/experiments/compute_final_metrics.py` and the 14 rows of
+    `final_metrics.json` (D=8, E=1, F=5). `island` and `party` are RAV confusable
+    diagnostics that stop short of calibration and were never evaluated. Distinct
+    keyword stems across *all* roots is **20**: those 16, plus `friday`
+    (`platform/data/keywords/`) and `showers`/`sunny`/`windy` (retired kNN-VC
+    ablation runs, built Jul 4). No counting rule yields 19. Caveat that cannot be
+    closed: `keywords/` is gitignored, so there is no history, and its directory
+    mtime is 2026-08-28 14:48 - three builds *could* have been deleted that day,
+    though three deleted evaluation keywords would have left detections logs, and
+    the only orphans (`cloudy`, `hope`, `south`) predate this era and have no
+    keyword artifacts at all.
 
 ### Decisions taken
 
