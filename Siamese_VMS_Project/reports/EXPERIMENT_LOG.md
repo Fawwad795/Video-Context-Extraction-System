@@ -812,3 +812,133 @@ from 84.21% to 92.7% and reducing EER from 23.36% to 14.4%").
 - **Pre-committed:** the same 500 classes at seed 777, and lambda stays at 4. No
   re-selection of lambda under the new expansions, even if a different value scores better
   on the reported set.
+
+## CMCD prong: E1-E3 executed, verified, and written into the paper (2026-09-03)
+
+Follow-on to the 2026-09-02 pre-flight above. No new scoring: all outputs are recounts
+and reweightings of the 49,981 stored sample scores. Script:
+`Siamese_VMS_Project/benchmarks/libriphrase/regrade_protocols.py`. Artifacts:
+`Journal_Paper/experiments/libriphrase/e1e2_protocol_variants_500.json`,
+`e3_length_breakdown_500.json`, `manifests/multiplicity_500.csv`.
+
+### Verification pass (five claims, each checked against a primary source)
+
+1. Our `compute_eer` and batch-averaging logic verified verbatim against upstream
+   `ncsoft/PhonMatchNet` `criterion/utils.py` (fetched from GitHub) - identical roc_curve,
+   `fnr = 1 - tpr`, `argmin|fnr-fpr|`, `(fpr+fnr)/2`, accumulated as score/count per batch.
+2. The 4-sample expansion (`anc_pos`/`anc_neg`/`com_pos`/`com_neg`) verified against
+   upstream `dataset/libriphrase.py` - exact match, including that `com_neg` pairs
+   comparison audio with **anchor** text.
+3. Batch size verified against upstream `train.py`: `2048 * num_replicas`, single V100
+   per their paper, so 2,048 - confirms the value already used.
+4. **Our 500-class manifest rebuilt from scratch** from the four published LibriPhrase
+   CSVs (`charsiu/libriphrase` on HuggingFace, downloaded locally) at seed 777: all 11
+   stored manifest counts reproduce exactly, including CMCD's own published episode
+   counts (13,173/7,815/1,401/168 unique anchor clips / 3 = 4,391/2,605/467/56).
+5. `regrade_protocols.py`'s `pmn_4trial` protocol reproduces `t1t2_metrics_500.json`
+   value-for-value (script's own sanity check, asserted on every run).
+
+### E1 - CMCD's own protocol, corrected from the 2026-09-02 plan
+
+The plan's proposed reconstruction (the balanced comparison-clip subset) was **wrong**,
+caught by checking the data rather than trusting the arithmetic: `anc_pos` and `com_neg`
+between them carry exactly the 500 anchor texts (CMCD's enrolled keyword), while
+`com_pos`/`anc_neg` carry the 7,238 negative phrases. CMCD's own wording - "positive and
+negative audio phrases for enrolled keywords (anchor)" - is `anc_pos + com_neg`. Result
+(batch-averaged, headline metric): LP-Easy 2.30/99.70 detector-only, LP-Hard 24.56/83.09.
+Both beat CMCD's reported 8.42/32.90 by a wide margin.
+
+### E2 - protocol robustness, plus one number that revises an already-published figure
+
+Five protocols scored (`pmn_4trial`, `cmcd_enrolled`, `cmcd_balanced`, `audio_fixed`,
+`raw_upstream`). Worst case across all five, batch-averaged: LP-Easy 2.30, LP-Hard 27.31 -
+both still far inside CMCD's 8.42/32.90.
+
+**`raw_upstream` is new and matters beyond CMCD.** Upstream's dataloader does no
+deduplication; our manifest builder dedups on (clip, keyword) within each split, and this
+was never declared. Measured exactly (a duplicated trial is the same pair and carries an
+identical score, so repeat-weighting is exact): LP-Easy 29,417 -> 35,352 trials (+16.8%),
+LP-Hard 20,564 -> 35,352 (+41.8%; one trial repeats 244 times). Effect on the **already-
+published PhonMatchNet-comparison headline**: batch-averaged EER moves from 2.08 to 2.19
+(LP-Easy) and 25.85 to 26.66 (LP-Hard). No conclusion in the PhonMatchNet comparison
+changes - still beat them on LP-Easy, still lose LP-Hard, margins unaffected - but the
+figure is 0.11-0.81 EER optimistic against the protocol PhonMatchNet's own code runs. Not
+retroactively corrected in the PhonMatchNet note (that result stands as measured under its
+declared protocol); carried forward into the paper as an additional reported protocol
+rather than a correction, per the researcher's instruction (2026-09-03) that the paper
+report findings, not process narrative.
+
+RAV's LP-Hard benefit is stable across all five protocols (batch-averaged delta -1.94 to
+-2.28). Its LP-Easy cost is not fixed: -0.74 (a gain) to +3.14, tracking which side of
+each pair supplies the enrolled positives.
+
+Also newly seed-tested: batch-averaged EER depends on the random shuffle. 18 seeds on
+`pmn_4trial` LP-Hard span 25.04-27.01 (1.97 EER wide, sd 0.54); LP-Easy buckets stay
+within 0.21. PhonMatchNet's own reported 18.82 carries the same unknowable-seed
+uncertainty. Our margins over CMCD are far outside this noise either way; batch-averaged
+stays the paper's headline metric (matches PhonMatchNet's convention), pooled reported
+alongside, per researcher decision 2026-09-03.
+
+### E3 - word-length breakdown: the LP-Hard win over CMCD is a one-word-keyword effect
+
+Detector-only, batch-averaged EER by keyword length: 1w 21.72 (n=13,424), 2w 32.95
+(n=5,626), 3w 36.51 (n=1,468), 4w 25.56 (n=46, too thin to trust). **Combined 2-or-more
+words (n=7,140): 33.84**, worse than CMCD's own reported aggregate of 32.90. Robust across
+10 seeds (<=0.48 spread on the reliable buckets). Mechanism: pooled whole-clip embeddings
+dilute a single confusable phone edit as phrase length grows, so the advantage that
+carries the aggregate LP-Hard win does not survive past one-word keywords.
+
+### Written into the paper (`paper/paper_skeleton.tex`, live file)
+
+- New `tab:libriphrase-protocols`: our EER under the four further constructible protocols
+  (CMCD's own, undeduplicated, comparison-clip-fixed, anchor-clip-fixed), detector and
+  +RAV columns, immediately after the headline `tab:libriphrase` table.
+- New `fig:bylength`: LP-Hard EER against keyword length, detector and +RAV curves, CMCD's
+  reported aggregate as a dashed reference line, 4-word point drawn hollow. Generated by
+  a new `by_length()` function in `Journal_Paper/figures/make_libriphrase_figs.py`, which
+  reads `e3_length_breakdown_500.json` directly rather than reimplementing the EER
+  computation, so the plotted values cannot drift from the quoted prose numbers.
+  `regrade_protocols.py`'s `run_lengths()` extended with a `"2plus"` combined bucket
+  (n=7,140) for the one number the paper needed that no single stored bucket gave.
+- Protocol methods paragraph added to Sec.~IV.A (`sec:libriphrase-protocol`) defining
+  CMCD's own construction and the deduplication deviation.
+- RAV subsection rewritten: LP-Hard benefit stated as the stable, robust claim (1.94-2.28
+  across protocols); LP-Easy cost restated as protocol-dependent rather than a fixed 0.35.
+- CMCD's parameter count (653K, from PhonMatchNet's own re-implementation in the same
+  table already cited for PhonMatchNet's 655K) added as one clause to the existing size
+  paragraph - no new citation needed.
+- Sanity-checked: environment/brace balance, every `\ref` resolves to a `\label`, both
+  figure PDFs exist on disk. Not run through a full Tectonic compile this pass.
+
+### Decisions taken
+
+- **The paper states results, not process.** Per researcher instruction 2026-09-03: no
+  sentence in the paper narrates the CED/CMCD naming correction, the E1 protocol
+  correction, or any other internal self-correction. That narrative lives here and in the
+  meeting note; the paper carries only the measured findings (protocol robustness, the
+  length-breakdown loss, RAV's variable easy-half cost, the parameter count).
+- **One figure only.** Chosen because the length-breakdown finding is the one result that
+  is a trend with a crossover point rather than a flat comparison; the other three
+  findings are reported as a table and short prose rather than given their own figures,
+  to hold the page budget.
+
+### Closing addendum (same session, after the entry above was written)
+
+- **Seed sensitivity now has an artifact.** The spreads quoted above were first computed
+  ad hoc with no backing file. `regrade_protocols.py` now has `run_seed_sensitivity()`
+  and writes `Journal_Paper/experiments/libriphrase/eer_seed_sensitivity_500.json`
+  (18 seeds, all five protocols plus every word-length bucket). It confirms the quoted
+  figures exactly: `pmn_4trial` LP-Hard min 25.04 / max 27.01 / spread 1.97 / sd 0.543.
+  It also corrects one note claim: the LP-Hard per-length spread is at most **0.57**
+  (the 2plus bucket), not 0.48. Buckets smaller than one 2,048 batch necessarily show
+  spread 0.00, and that is recorded rather than hidden.
+- **`paper_skeleton.pdf` recompiled** with Tectonic 0.17.0 (downloaded to the session
+  scratchpad; not persistent). 3 pages, no undefined references or citations, two trivial
+  typographic warnings. Verified by rendering: Table I and Table II appear in the correct
+  order, Fig. 2 renders as intended, and "CED" appears nowhere in the PDF. This supersedes
+  the "not run through a full Tectonic compile this pass" line in the entry above.
+- **`main.tex` is not the submission document.** Confirmed by the researcher 2026-09-03:
+  `main.tex` plus `paper/sections/*.tex` is a **reference draft** kept for consultation;
+  the paper being submitted is built section by section in `paper/paper_skeleton.tex`.
+  The two have diverged - `sections/*.tex` was last touched 2026-08-28 and contains none
+  of the CMCD work. Recorded in `.claude/CLAUDE.md` so it is not rediscovered.
