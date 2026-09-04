@@ -1127,3 +1127,138 @@ so the unwritten §5.5 ablations can have them back - and regeneration is now re
 rather than optional, because the July renders were drawn from the pre-rebuild
 `keywords/*_calibration_*.json`, which no longer exist. `paper_skeleton.pdf` recompiles
 clean after the deletions: 5 pages, no unresolved references.
+
+## Backend x calibration grid, MSWC vocabulary overlap, and the paper build - 2026-09-05
+
+Paper-writing session. Three things were measured, one of which corrects an entry
+above; the rest of the session was the write-up and is recorded in
+`Journal_Paper/meeting_notes_work/2026-09-05-paper-completion.md`.
+
+### 1. The "mean-pool micro F1 0.20" figure is a confound, not a backend effect
+
+The Step-3 entry (2026-07-03) records the frozen mean-pool backend at detector-only
+micro F1 0.20 against the trained head's 1.00, and that gap has been the project's
+headline argument for the head ever since. It does not survive a matched re-run.
+
+That July mean-pool run **predates both calibration fixes** (negative-sample leakage
+and the pooling-path mismatch). It therefore varied the backend and the calibration
+protocol together. Rebuilt seeded under the current protocol, on the same five Set D
+keywords and 50 chunk decisions, mean-pool scores **micro F1 0.941 / macro 0.960**
+(8/0/1) against the trained head's **1.000** (9/0/0). The backend gap is **0.059**,
+one chunk: a single `ireland` occurrence mean-pool leaves below its threshold.
+Artifact: `Journal_Paper/experiments/ablation/backend_wavlm.json`.
+
+This does not retire the head. It relocates the evidence for it: held-out zero-shot
+AUC 0.637 -> 0.974 (already logged under Step 3, unaffected - that measurement never
+touched calibration), plus every LibriPhrase and Speech Commands number in the paper.
+What it retires is the *broadcast* 0.20 -> 1.00 framing. Do not quote it again.
+
+### 2. Backend x calibration, 2 x 4 grid, all eight cells measured
+
+The calibration axis had no artifacts at all before this session. `calibrate.py`
+gained two ablation-only flags, **both defaulting OFF**:
+
+- `--no-guard` - draw calibration negatives from ALL chunks, including
+  keyword-bearing ones (i.e. the pre-fix leakage behaviour).
+- `--isolated-negatives` - embed negatives as isolated windows rather than through
+  the detector's chunk-pooled path.
+
+Defaults verified unchanged after the edit: `weather` reproduces threshold 4.439,
+base 2.969, safety +1.470, n_neg 3117. Every calibration JSON now stamps `"guard"`
+and `"negatives_aligned"`, so a file records which protocol produced it.
+
+| backend | calibration | TP/FP/FN | micro | macro |
+|---|---|---|---|---|
+| mean-pool | aligned + guard | 8/0/1 | 0.941 | 0.960 |
+| mean-pool | isolated + guard | 4/0/5 | 0.615 | 0.400 |
+| mean-pool | aligned, no guard | 0/0/9 | 0.000 | 0.000 |
+| mean-pool | isolated, no guard | 0/0/9 | 0.000 | 0.000 |
+| trained head | **aligned + guard** (shipped) | **9/0/0** | **1.000** | **1.000** |
+| trained head | isolated + guard | 9/1/0 | 0.947 | 0.971 |
+| trained head | aligned, no guard | 0/0/9 | 0.000 | 0.000 |
+| trained head | isolated, no guard | 0/0/9 | 0.000 | 0.000 |
+
+Findings, in order of size:
+
+- **The transcript guard dominates everything.** Without it *both* backends score
+  zero - they miss all nine occurrences rather than degrading. A keyword-bearing
+  chunk contributes its own utterance to the negative pool, that window becomes the
+  maximum negative, and the threshold is then set above the score it exists to admit.
+  The failure is silent: the run reports no error and the detector simply never fires.
+- **Pooling-path alignment is worth 0.326 micro F1 to mean-pool and 0.053 to the
+  trained head.** That asymmetry is the more useful reading: the head does not buy a
+  higher ceiling, it buys tolerance of a calibration that is not perfectly aligned
+  with the detector.
+- **The backend contributes least** under the shipped protocol (0.059, above).
+
+Caveats stated in the paper and repeated here: five keywords, one chunk set, so the
+0.059 rests on a single chunk and is not a precise effect size. The isolated cells
+draw 4,000 negative windows against the aligned cells' 2,316-3,117, because
+one-forward-pass-at-a-time embedding bounds how many can be scored; the aligned path
+is exhaustive over available windows by construction.
+
+Harness: `Siamese_VMS_Project/benchmarks/broadcast/backend_ablation.py` (Modal, eight
+cells run as one `.map()`). It carries a local `_suffix()` mirroring
+`scoring.artifact_suffix` deliberately: `scoring.py` binds BACKEND at import and Modal
+reuses containers, so a cell would otherwise inherit the previous cell's suffix.
+Artifact: `Journal_Paper/experiments/ablation/backend_x_calibration.json`.
+Written into the paper as Table V, section V-E.
+
+### 3. LibriPhrase test vocabulary vs the head's MSWC training classes - answered
+
+Carried open since 2026-08-28. The checkpoint never stored its class list, so the
+1,000 trained classes are **reconstructed** from `tts_bank.py` and
+`dataset_v3.py::select_classes`; the eval-word filter cannot be reconstructed at all
+(its bank manifest is gone), so the class set is **bounded** by a strict and a liberal
+reconstruction differing by 180 words. The harness self-asserts against four constants
+of the published GSC run (csv_rows 5,266,726; distinct_keywords 38,150;
+candidates_after_filter 24,003; cutoff_candidate_rank 1,094), all reproduced.
+
+Result, on the 49,981 deduplicated trials: **30.3% full overlap, 16.4% partial,
+51.9% unseen** (strict; liberal moves these by about 1 point). Per split, LP-Easy
+31.9% full and LP-Hard 28.1% full - LP-Hard, the half we lose, is the *less* exposed
+one, so overlap does not explain the LP-Easy result and cannot be blamed for the
+LP-Hard one either. Anchor classes at the 500-keyword sample: 24.2% full / 24.6%
+partial / 50.4% unseen.
+
+**This is exposure, not leakage.** MSWC clips are isolated single words; LibriPhrase
+clips are LibriSpeech utterances. No audio is shared. Recorded so a reviewer's
+question has an answer, not because a contamination was found.
+
+Harness: `Siamese_VMS_Project/benchmarks/libriphrase/mswc_vocab_check.py` (Modal).
+Artifacts: `Journal_Paper/experiments/libriphrase/mswc_vocab_check.json`,
+`mswc_overlap_strata.csv`.
+
+### 4. The 4,003 anchor-class denominator
+
+Section IV-A needed the size of the pool the 500 reported keywords are drawn from, and
+no artifact held it. Computed on Modal from the same CSVs `harness.py::make_manifests`
+draws from: **4,003 unique keywords** (2,098 one-word, 1,507 two-word, 354 three-word,
+44 four-word) across the diffspk easy- and hard-negative rows. Artifact:
+`Journal_Paper/experiments/libriphrase/anchor_class_count.json`. Harness:
+`benchmarks/libriphrase/count_anchor_classes.py`.
+
+### 5. Two descriptions in the method were wrong and were corrected before publication
+
+Both found by reading the shipped code rather than the design docs, and both would
+have been visible to a reviewer who read the repo.
+
+- **"AS-norm" is S-norm at the shipped settings.** Cohort size 50 and top_k 50 give
+  `k = min(50, 50)`, so the adaptive top-k selection degenerates to the full cohort.
+  Confirmed by running the shipped scorer: bit-identical to full-cohort normalisation.
+  The name is kept (the code path is adaptive and larger cohorts would use it), but
+  section III-E now discloses the operating point. Researcher's call, 2026-09-04.
+- **The head does not do attentive *statistics* pooling.** It pools a weighted mean
+  only - no weighted standard deviation. Section III-D was rewritten and the
+  attentive-statistics paper is now cited as the *contrasting* mechanism, not ours.
+
+### 6. Also true, not experiments
+
+- **`ieeeaccess.cls` and TikZ cannot coexist.** The PGF math library fails under the
+  class and the damage reaches the `\@outputdblcol` output routine, producing blank
+  verso pages and a 22-page document. Isolated: `article` and `IEEEtran` are clean, so
+  it is the class. Worked around by pre-rendering each diagram standalone to PDF and
+  including it as an image. See the environment traps in `.claude/CLAUDE.md`.
+- **The paper builds with local MiKTeX pdfLaTeX now, not Tectonic.** `ieeeaccess`
+  needs `spotcolor.sty`, which is pdfTeX-only, so Tectonic (XeTeX) cannot build it at
+  all. Tectonic is still used for the standalone figure PDFs.
