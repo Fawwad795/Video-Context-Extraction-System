@@ -715,3 +715,25 @@ def t2(cohort: str = "devclean"):
     print(f"T2: {len(kws):,} LP-Hard keywords, cohort={cohort}")
     _drive("t2", [{"keyword": k, "cohort": cohort, "need_rivals": True}
                   for k in kws])
+
+
+# The ten Speech Commands targets (see modal_gsc.py for the protocol's source).
+GSC_WORDS = ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
+GSC_ROOT = "/data/run_gsc"
+
+
+@app.local_entrypoint()
+def gsc_enroll(cohort: str = "devclean"):
+    """CED prong: anchor + cohort + rivals for the ten Speech Commands words.
+
+    Deliberately a SEPARATE project root. Several of the ten ("right", "down",
+    "on", "no", ...) also occur as one-word LibriPhrase keywords, and those
+    artifacts were built by t1 with need_rivals=False. Sharing /data/run would
+    silently reuse a rival-less artifact and RAV would abstain without saying so.
+
+    Cohort source stays LibriSpeech dev-clean, locked 2026-08-28 - outside Speech
+    Commands, so scores are not normalised using the test set.
+    """
+    print(f"GSC: {len(GSC_WORDS)} keywords, cohort={cohort}, root={GSC_ROOT}")
+    _drive("gsc_enroll", [{"keyword": k, "cohort": cohort, "need_rivals": True,
+                           "root": GSC_ROOT} for k in GSC_WORDS])

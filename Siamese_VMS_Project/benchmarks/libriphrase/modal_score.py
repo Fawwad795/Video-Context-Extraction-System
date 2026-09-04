@@ -44,7 +44,17 @@ EER_SEED = 777
 N_EMB_SHARDS = 64
 N_SCORE_SHARDS = 32
 
-SPLITS = {"500": "samples_500.csv", "sel": "samples_selection40.csv"}
+SPLITS = {"500": "samples_500.csv", "sel": "samples_selection40.csv",
+          "gsc": "samples_gsc.csv"}
+
+# Audio root per split. LibriPhrase splits keep LP_AUDIO; the Speech Commands
+# prong (P5) reads its own staged copy. Additive: the "500"/"sel" behaviour that
+# produced t1t2_metrics_500.json is unchanged.
+AUDIO_ROOTS = {"gsc": "/data/gsc/audio"}
+
+
+def _audio_root(split):
+    return AUDIO_ROOTS.get(split, LP_AUDIO)
 
 
 # --------------------------------------------------------------------------
@@ -76,7 +86,8 @@ def embed_clips(task: dict):
     names, embs, failed = [], [], []
     for rel in mine:
         try:
-            y, _ = librosa.load(os.path.join(LP_AUDIO, rel), sr=SAMPLE_RATE)
+            y, _ = librosa.load(os.path.join(_audio_root(split), rel),
+                                sr=SAMPLE_RATE)
             e = embed_batch(model, [y.astype(np.float32)])[0]
         except Exception as exc:
             failed.append(f"{rel}: {exc}")
@@ -278,6 +289,99 @@ def metrics(split: str = "500", lambdas: str = "0,0.5,1,2,4", tag: str = ""):
     return out
 
 
+@app.function(image=image, volumes={"/data": data}, cpu=2.0, memory=16384,
+              timeout=3600)
+def metrics_gsc(lambdas: str = "0,0.5,1,2,4", tag: str = ""):
+    """Speech Commands metrics: overall, then split by training-vocabulary group.
+
+    Separate from metrics() rather than folded into it: that function produces
+    the published LibriPhrase numbers and regrade_protocols.py asserts against
+    them, so it is left byte-for-byte alone. compute_eer/their_eer below are
+    copies of its definitions, which are in turn PhonMatchNet's criterion/utils.py.
+
+    Groups come from the manifest's `src` column, set by modal_gsc.py from
+    Journal_Paper/experiments/gsc/mswc_vocab_check.json: `unseen` = the four words
+    absent from MSWC entirely, `seen` = the six that were training classes.
+    """
+    import glob
+
+    import numpy as np
+    import pandas as pd
+    from sklearn.metrics import roc_auc_score, roc_curve
+
+    def compute_eer(label, pred):
+        fpr, tpr, _ = roc_curve(label, pred)
+        fnr = 1 - tpr
+        i = int(np.nanargmin(np.absolute(fnr - fpr)))
+        return (fpr[i] + fnr[i]) / 2
+
+    def their_eer(label, pred, batch=EER_BATCH, seed=EER_SEED):
+        idx = np.random.default_rng(seed).permutation(len(label))
+        vals, skipped = [], 0
+        for i in range(0, len(idx), batch):
+            b = idx[i:i + batch]
+            if len(np.unique(label[b])) < 2:
+                skipped += 1
+                continue
+            vals.append(compute_eer(label[b], pred[b]))
+        return float(np.mean(vals)) * 100, len(vals), skipped
+
+    files = sorted(glob.glob(f"{SCORE_DIR}/gsc{tag}_*_*.csv"))
+    if not files:
+        return {"error": f"no gsc score files under {SCORE_DIR}"}
+    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    df = df.drop_duplicates(subset=["wav", "text", "type"])
+    print(f"loaded {len(df):,} scored trials from {len(files)} shard files")
+
+    lam_list = [float(x) for x in lambdas.split(",")]
+    out = {"split": "gsc", "tag": tag, "n_samples": int(len(df)),
+           "eer_batch": EER_BATCH, "eer_seed": EER_SEED,
+           "protocol": "closed_10 (PhonMatchNet dataset/google.py)",
+           "results": []}
+
+    groups = [("all", df["text"].notna()),
+              ("seen-6", df["src"] == "seen"),
+              ("unseen-4", df["src"] == "unseen")]
+    groups += [(f"word:{w}", df["text"] == w) for w in sorted(df["text"].unique())]
+
+    for name, sel in groups:
+        d = df[sel]
+        if d.empty or d["label"].nunique() < 2:
+            continue
+        y = d["label"].to_numpy()
+        det = d["s_det"].to_numpy(float)
+        marg = d["margin"].to_numpy(float)
+        delta = d["delta"].to_numpy(float)
+
+        row = {"subset": name, "n": int(len(d)), "pos": int(y.sum()),
+               "n_no_rivals": int(np.isnan(marg).sum())}
+        e, nb, sk = their_eer(y, det)
+        row["detector"] = {"eer_batchavg": round(e, 2),
+                           "eer_pooled": round(compute_eer(y, det) * 100, 2),
+                           "auc_pooled": round(roc_auc_score(y, det) * 100, 2),
+                           "n_batches": nb, "skipped_batches": sk}
+        row["cascade"] = {}
+        for lam in lam_list:
+            pen = np.nan_to_num(np.maximum(0.0, delta - marg), nan=0.0)
+            s = det - lam * pen
+            e, nb, sk = their_eer(y, s)
+            row["cascade"][f"lambda={lam:g}"] = {
+                "eer_batchavg": round(e, 2),
+                "eer_pooled": round(compute_eer(y, s) * 100, 2),
+                "auc_pooled": round(roc_auc_score(y, s) * 100, 2)}
+        out["results"].append(row)
+
+    os.makedirs(f"{RUN_ROOT}/results", exist_ok=True)
+    p = f"{RUN_ROOT}/results/metrics_gsc{tag}.json"
+    with open(p, "w") as f:
+        json.dump(out, f, indent=2)
+    data.commit()
+    print(json.dumps(out, indent=2))
+    print("\nAs reported on this set: CED 13.45 EER / 93.94 AUC   "
+          "CMCD 27.25 / 81.06")
+    return out
+
+
 # --------------------------------------------------------------------------
 # Entrypoints
 # --------------------------------------------------------------------------
@@ -315,3 +419,8 @@ def score(split: str = "500", need_margin: bool = False,
 @app.local_entrypoint()
 def report(split: str = "500", lambdas: str = "0,0.5,1,2,4", tag: str = ""):
     metrics.remote(split=split, lambdas=lambdas, tag=tag)
+
+
+@app.local_entrypoint()
+def report_gsc(lambdas: str = "0,0.5,1,2,4", tag: str = ""):
+    metrics_gsc.remote(lambdas=lambdas, tag=tag)
