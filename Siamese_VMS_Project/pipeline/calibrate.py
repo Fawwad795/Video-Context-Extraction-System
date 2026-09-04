@@ -48,8 +48,9 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 
 import console as ui
 from scoring import (DEFAULT_TOP_K, PROJECT_ROOT, SAMPLE_RATE, anchor_path,
-                     asnorm_windows, calibration_path, keyword_free_chunks,
-                     l2_normalize, load_cohort, load_siamese_model,
+                     asnorm_windows, calibration_path, embed_batch,
+                     keyword_free_chunks, l2_normalize, list_chunk_audios,
+                     load_cohort, load_siamese_model, sample_stream_windows,
                      sample_stream_window_embeddings)
 
 
@@ -66,6 +67,18 @@ def main():
                          "recall is preserved. 0 disables (pure percentile).")
     ap.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     ap.add_argument("--seed", type=int, default=777)
+    # ---- ablation switches. Both default OFF; the defaults are exactly the
+    # protocol every reported result used. They exist so the two calibration
+    # bugs fixed on 2026-07-03 can be re-measured on demand instead of being
+    # quoted from the ledger, and they should never be passed by a real run.
+    ap.add_argument("--no-guard", action="store_true",
+                    help="ABLATION ONLY: draw negatives from every chunk, "
+                         "keyword-bearing ones included, reproducing the "
+                         "pre-fix leaked-negative protocol.")
+    ap.add_argument("--isolated-negatives", action="store_true",
+                    help="ABLATION ONLY: embed negatives as isolated windows "
+                         "rather than through the detector's chunk-pooled "
+                         "path, reproducing the pre-fix scoring mismatch.")
     args = ap.parse_args()
 
     keyword = args.keyword
@@ -102,9 +115,20 @@ def main():
     # via the detector's own scoring path (chunk-context frame pooling for
     # frame backends), so the fitted percentile describes the distribution
     # the detector actually thresholds.
-    neg_files = keyword_free_chunks(keyword)
-    neg_embs = sample_stream_window_embeddings(
-        model, window_samples, args.negatives, rng, files=neg_files)
+    if args.no_guard:
+        neg_files = list_chunk_audios()
+        ui.warn("--no-guard: negatives drawn from ALL chunks, keyword-bearing "
+                "ones included. Ablation protocol, not a valid calibration.")
+    else:
+        neg_files = keyword_free_chunks(keyword)
+    if args.isolated_negatives:
+        ui.warn("--isolated-negatives: embedding negatives as isolated windows "
+                "off the detector's scoring path. Ablation protocol.")
+        neg_embs = embed_batch(model, sample_stream_windows(
+            window_samples, args.negatives, rng, files=neg_files))
+    else:
+        neg_embs = sample_stream_window_embeddings(
+            model, window_samples, args.negatives, rng, files=neg_files)
 
     pos_scores, pos_raw = asnorm_windows(positives, centroid, cohort, args.top_k)
     neg_scores, neg_raw = asnorm_windows(neg_embs, centroid, cohort, args.top_k)
@@ -185,6 +209,10 @@ def main():
         "n_pos": int(len(pos_scores)),
         "n_neg": int(len(neg_scores)),
         "est_recall": est_recall,
+        # Stamped so an artifact is self-describing: any file with either of
+        # these true came from an ablation run, not from the reported protocol.
+        "guard": not args.no_guard,
+        "negatives_aligned": not args.isolated_negatives,
         "calibrated_at": datetime.now().isoformat(timespec="seconds"),
     }
     out_path = calibration_path(keyword)
