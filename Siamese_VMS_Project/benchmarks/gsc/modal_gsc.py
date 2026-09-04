@@ -27,12 +27,12 @@ words absent from MSWC entirely (no, up, on, go), `seen` for the six that were
 training classes. The two groups are reported separately.
 
 Run in order:
-    modal run modal_gsc.py::fetch          # ~1.4 GB, cloud-to-cloud
-    modal run modal_gsc.py::manifest
-    modal run modal_app.py::gsc_enroll     # 10 keywords, anchor + cohort + rivals
-    modal run modal_score.py::embed --split gsc
-    modal run modal_score.py::score --split gsc --need-margin
-    modal run modal_score.py::report_gsc
+    modal run gsc/modal_gsc.py::fetch          # ~1.4 GB, cloud-to-cloud
+    modal run gsc/modal_gsc.py::manifest
+    modal run gsc/harness.py::gsc_enroll     # 10 keywords, anchor + cohort + rivals
+    modal run common/modal_score.py::embed --split gsc
+    modal run common/modal_score.py::score --split gsc --need-margin
+    modal run common/modal_score.py::report_gsc
 """
 
 import json
@@ -40,9 +40,14 @@ import os
 
 import modal
 
-from modal_app import RUN_ROOT, data, image
+import os
+import sys
 
-app = modal.App("vms-gsc")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.runtime import RUN_ROOT, data, image
+
+app = modal.App("vms-gsc-stage")
 
 GSC_URL = "http://download.tensorflow.org/data/speech_commands_v0.01.tar.gz"
 GSC_DIR = "/data/gsc"

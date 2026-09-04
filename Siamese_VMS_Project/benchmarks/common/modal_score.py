@@ -20,9 +20,9 @@ multi-scale detector silently drops clips whose frame count is below the window
 (8/840), while whole-clip scores every clip and scores slightly better.
 
 Run:
-    modal run modal_score.py::embed --split 500
-    modal run modal_score.py::score --split 500 --need-margin
-    modal run modal_score.py::report --split 500
+    modal run common/modal_score.py::embed --split 500
+    modal run common/modal_score.py::score --split 500 --need-margin
+    modal run common/modal_score.py::report --split 500
 """
 
 import json
@@ -30,7 +30,12 @@ import os
 
 import modal
 
-from modal_app import RUN_ROOT, data, image
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.runtime import RUN_ROOT, data, image
 
 app = modal.App("vms-libriphrase-score")
 

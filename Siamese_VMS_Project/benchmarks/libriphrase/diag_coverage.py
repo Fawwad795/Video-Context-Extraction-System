@@ -7,7 +7,14 @@ Checks three possible causes independently:
 """
 import modal
 
-from modal_app import MANIFEST, RUN_ROOT, data, image
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common.runtime import RUN_ROOT, data, image
+
+MANIFEST = f"{RUN_ROOT}/manifests"
 
 # Inlined rather than imported from modal_score: Modal automounts the entrypoint
 # file and modal_app (which defines the image object it has to serialise), but
