@@ -960,3 +960,170 @@ carries the aggregate LP-Hard win does not survive past one-word keywords.
   the paper being submitted is built section by section in `paper/paper_skeleton.tex`.
   The two have diverged - `sections/*.tex` was last touched 2026-08-28 and contains none
   of the CMCD work. Recorded in `.claude/CLAUDE.md` so it is not rediscovered.
+
+## P5 (CED) and the broadcast keyword rebuild - 2026-09-04
+
+Two prongs in one session, both on Modal, both backed by artifacts on disk.
+
+### P5: Google Speech Commands, the CED prong
+
+**Result. Detector 4.69 EER (batch-averaged) / 4.90 pooled, AUC 97.80**, against CED's
+reported 13.45 / 93.94 and CMCD's reported 27.25 / 81.06. 25,670 trials over 2,567 clips.
+Artifact: `Journal_Paper/experiments/gsc/metrics_gsc.json`.
+
+- **The protocol is inherited, not invented.** Neither CED nor CMCD documents how a clip
+  and a keyword become a trial. PhonMatchNet's `dataset/google.py` does, and we followed
+  it: the official `testing_list.txt` restricted to the ten TC-ResNet commands, each clip
+  scored against all ten texts, one positive and nine negatives. Its `__main__` uses
+  batch 2,048, the EER convention we already reproduce.
+- **Data-source trap avoided.** HuggingFace `google/speech_commands` v0.01 has a `test`
+  split of 3,081 clips; the official `testing_list.txt` has 6,835. TC-ResNet, and so CMCD
+  and CED, used the latter. We fetched the canonical 1,489,096,277-byte archive.
+  Reconciliation, all five checks pass: `manifest_reconciliation.json`.
+- **Not a batching artifact.** 18 seeds span 4.61 to 5.19, sd 0.15; pooled EER has no seed
+  and sits at 4.90. `eer_seed_sensitivity_gsc.json`.
+- **Vocabulary control.** `benchmarks/gsc/mswc_vocab_check.py` reproduces both selection
+  rules (tts_bank.py's candidate filter and seed-42 holdout, then
+  dataset_v3.py select_classes) over MSWC English train metadata: 5,266,726 rows, 38,150
+  distinct keywords, 24,003 candidates, cut-off at candidate rank 1,094. Six of the ten
+  commands were training classes (down 81, right 94, off 120, left 147, yes 245,
+  stop 368); **no, up, on and go have zero MSWC instances**, so they were unreachable by
+  every stage - training classes, confusable neighbours and the TTS bank all draw from the
+  same candidate list. Scored separately: seen-6 3.24 batchavg / 3.54 pooled / 98.17 AUC;
+  unseen-4 5.78 / 6.47 / 97.28. Even the unseen four beat CED's reported 13.45 by better
+  than two to one. Confound recorded: those four are also the shortest words, two phonemes
+  each, so brevity and unfamiliarity are not separable. `mswc_vocab_check.json`.
+- **RAV costs on this set**: 4.69 to 6.08 at lambda 1 to 8.80 at lambda 4. All ten armed
+  rivals and no trial abstained, so the stage ran; nine of ten negatives per clip are
+  unrelated commands rather than confusables. Consistent with the LP-Easy cost of +0.35
+  against the LP-Hard gain of -1.94. Third instance of the same asymmetry.
+- Harness: `benchmarks/libriphrase/modal_gsc.py`, `modal_app.py::gsc_enroll`,
+  `modal_score.py` (gsc split, per-split audio root, `metrics_gsc`). `metrics()` was left
+  untouched so `regrade_protocols.py` still reproduces the published LibriPhrase numbers.
+  Cost: ~0.4 core-hours enrolment plus ~15 min scoring, free tier.
+
+### The broadcast rebuild - carried since 2026-08-28, now closed
+
+**The 14 evaluation keywords were rebuilt from text under the seeded synthesis path, and
+the pre-fix originals were discarded on the researcher's instruction (2026-09-04). The
+rebuild is now the canonical artifact set.**
+
+- **Detector micro-F1 1.000 survives exactly** - 28/28, zero false positives, every
+  keyword identical to the original run.
+- **Cascade moved 27/28 (0.982) to 28/28 (1.000).** The entire change is one chunk:
+  `outbreaks` / `live_2.wav`, a true occurrence the detector fires on in both runs (4.986
+  originally, 5.468 rebuilt) that RAV rejected before and accepts now. RAV was armed - 15
+  rival centroids, delta at the floor of 0.0 - so this is not an inert verifier. With
+  delta at the floor, rejection means losing the argmax to a rival at every window, and a
+  re-synthesised anchor changes that marginal contest. Not evidence that RAV improved.
+- **Single-variable check, run before trusting the comparison.** `git log` over `core/`
+  and `pipeline/` since the originals (calibrations 2026-07-10, detections 2026-07-12)
+  returns one commit: `b809730`, +26 lines to `keyword_generator.py`, the seeding fix. Two
+  2026-07-12 commits were cleared individually: `a054676` finalised the RAV constants and
+  its message reports 27/28 with detector 28/28, exactly what `final_metrics.json` held,
+  so the artifacts already reflected them; `bcf4657` only deleted the retired phone-CTC
+  branch (11 insertions, 101 deletions).
+- **Recipe drift caught before it confounded the run.** The LibriPhrase harness passes
+  `--n-random 5` (12 voices) and uses dev-clean cohorts. The originals used defaults:
+  7 canonical voices (`america_variants/` held 7 files; holdout 4 x (1 + 2 augment) = the
+  12 calibration positives on record), 50 stream windows with no TTS distractors, and a
+  cohort drawn from the keyword's own chunkset. `modal_rebuild.py` passes no stage args.
+- **Reproducibility is decision-level, not bit-level.** Two independent rebuilds into
+  separate roots agree on every per-keyword row and every aggregate; thresholds differ by
+  at most 0.001 and per-chunk scores by at most 0.0019. Array hashes: 27 identical, 15
+  differing across 5 of 14 keywords (russia, insurance, administration, celebrate,
+  fireworks). That magnitude is floating-point accumulation across different container
+  hardware, not unseeded randomness - the original bug made two builds disagree on all 15
+  arrays. **The claim to make is that thresholds reproduce to three decimals and decisions
+  reproduce exactly, not that the pipeline is bit-deterministic.** Untested: two rebuilds
+  pinned to identical hardware.
+- Artifacts: `Journal_Paper/experiments/rebuild_2026_09_04/` - `logs/` and `logs2/` (both
+  rebuilds' detections), `final_metrics_rebuild.json`, `final_metrics_rebuild2.json`,
+  `final_metrics_original_recomputed.json`. Harness: `modal_rebuild.py`.
+
+### A stale artifact, found on the way
+
+**`final_metrics.json` did not match its own inputs.** It was dated 2026-07-10 20:19,
+about 29 hours older than the detection files it described (2026-07-12 01:13). Recomputing
+from those files gave the same aggregate (27/28, F1 0.982) but attributed the single RAV
+rejection to `outbreaks`, not `ireland` as the file recorded - two per-keyword rows wrong.
+It has been regenerated and now reflects the rebuilt artifacts (detector and cascade both
+28/28, F1 1.000). **Generate any per-keyword broadcast table by running
+`compute_final_metrics.py`, never by reading a stored copy.** The script gained optional
+`--logs` and `--out`; both default to the previous behaviour, and the default run still
+reproduced 1.000 / 0.982 against the originals before they were replaced.
+
+### Environment traps, all silent
+
+1. **Git Bash rewrites absolute path arguments.** `--root /data/run_gsc` reached Modal as
+   `C:/Program Files/Git/data/run_gsc` (MSYS path conversion). Every shard looked for
+   anchors in a nonexistent path, found none, wrote an empty CSV and **exited 0**. Caught
+   by `scored 0 samples` against a manifest of 25,670, not by any exit code. Fix:
+   `MSYS_NO_PATHCONV=1` on any `modal run` passing a container path.
+2. **The failed pass left empty score CSVs**, and `score_shard` skips a shard whose output
+   already exists. Without `--force` the re-run would have "succeeded" instantly against
+   them - the idempotency trap this ledger already records, hit again.
+3. `modal run` needs `PYTHONIOENCODING=utf-8 PYTHONUTF8=1` on this machine, or the CLI's
+   own tick character crashes it under cp1252.
+4. Quoted heredocs into `.md` files intermittently fail to parse in Git Bash; write the
+   content to a file and `cat` it instead.
+
+### Desk verification of CED itself
+
+CED = **Common Embedding based Detector** (Fig. 2 caption and Section 2 of its own paper).
+The 2026-09-02 entry saying the acronym is "not expanded in its own paper" is **wrong** and
+is corrected here. Its Table 1, transcribed from the PDF: LP-E 1.70 / 99.84, LP-H
+14.40 / 92.70, Speech Commands 13.45 / 93.94, with the no-confusable ablation at
+0.80 / 99.94, 18.40 / 89.20, 14.05 / 93.16. Corroborated by ProKWS, MALEFA, DMA-KWS and
+KFC-KWS. Params 3.8M per its Section 3.2 (ProKWS and DMA-KWS misprint 3.6M). PDF added to
+`Published_Paper_Reads_For_Extension/Baseline_Comparator_Papers/`.
+
+### Addendum, same session: benchmark layout and the removal of the old draft
+
+Both on the researcher's instruction, after the entries above were written.
+
+**The benchmark folder was reorganised.** Each benchmark now owns its folder and its own
+`harness.py`; the shared runtime lives once and is composed in with `modal.App.include`:
+
+```
+benchmarks/
+  common/runtime.py      image, volumes, COHORTS, STAGE_ARGS, and the shared Modal
+                         functions (enroll, enroll_batch, fingerprint, purge,
+                         cleanup_clips, write_results) on app "vms-runtime"
+  common/modal_score.py  the two-pass scorer + metrics + metrics_gsc, serving both
+                         LibriPhrase and Speech Commands
+  libriphrase/harness.py app "vms-libriphrase": manifests, EXPECT, t1/t2/selection/...
+  gsc/harness.py         app "vms-gsc": gsc_enroll
+  gsc/modal_gsc.py       app "vms-gsc-stage": staging and the trial table
+  broadcast/harness.py   app "vms-broadcast": the 14-keyword rebuild and
+                         verify_determinism
+```
+
+`libriphrase/modal_app.py` is gone; its shared half became `common/runtime.py` and its
+LibriPhrase half `libriphrase/harness.py`. Every function body was moved as a verbatim
+line slice rather than retyped, so the runtime cannot have drifted in transcription.
+
+**One trap this makes explicit.** `STAGE_ARGS = {"keyword_generator": ["--n-random", "5"]}`
+is applied inside the shared `enroll`, so LibriPhrase and Speech Commands both enrol with
+12 voices - which is what the paper states. The broadcast rebuild must not use that path;
+`broadcast/harness.py` runs the pipeline stages itself with no extra arguments, because
+those keywords were originally built with the 7-voice default. That is now written at the
+top of `common/runtime.py`.
+
+Verified after the move: all nine modules import; `regrade_protocols.py` still reproduces
+every stored value in `t1t2_metrics_500.json` exactly; and `modal run
+gsc/modal_gsc.py::manifest` ran in a container against the shared image and reproduced all
+five staging checks (2,567 clips, 25,670 trials).
+
+**The old reference draft was deleted.** `paper/main.tex`, `paper/main.pdf`,
+`paper/sections/*.tex` (8 files) and the seven figures only that draft used
+(`fig_backend_separation`, `fig_calibration_anatomy`, `fig_corr_vs_ours`, `fig_f1_bars`,
+`fig_threshold_sensitivity`, `fig_training_curve`, `fig_two_view`, pdf and png each) are
+gone, along with the stale `paper_skeleton.log`/`.blg`. `paper_skeleton.tex` is the only
+paper.
+
+`figures/make_figures.py` was **kept**. It regenerates those plots from live project data,
+so the unwritten §5.5 ablations can have them back - and regeneration is now required
+rather than optional, because the July renders were drawn from the pre-rebuild
+`keywords/*_calibration_*.json`, which no longer exist. `paper_skeleton.pdf` recompiles
+clean after the deletions: 5 pages, no unresolved references.
